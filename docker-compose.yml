@@ -1,0 +1,65 @@
+services:
+
+  # ── API FastAPI ─────────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development     # utilise le stage dev (avec hot-reload)
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"           # localhost:8000 → container:8000
+    volumes:
+      - .:/app                # monte le code local → hot-reload
+    env_file:
+      - .env                  # charge toutes les variables d'environnement
+    environment:
+      # Écrase les URLs pour pointer vers les services Docker (pas localhost)
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/fii_misside_db
+      - DATABASE_URL_SYNC=postgresql://postgres:password@postgres:5432/fii_misside_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy   # attend que PostgreSQL soit prêt
+      redis:
+        condition: service_healthy   # attend que Redis soit prêt
+    restart: unless-stopped
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine       # image légère basée sur Alpine Linux
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: fii_misside_db
+    ports:
+      - "5432:5432"                 # accès depuis ton IDE (TablePlus, DBeaver...)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # données persistantes
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fii_misside_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data            # données persistantes entre redémarrages
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+# Volumes nommés : Docker les gère, données persistantes entre `docker compose down/up`
+# Pour tout réinitialiser : docker compose down -v
+volumes:
+  postgres_data:
+  redis_data:
