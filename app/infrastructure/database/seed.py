@@ -7,17 +7,17 @@ Crée le premier administrateur si aucun n'existe.
 Usage : python -m app.infrastructure.database.seed
    ou : make seed
 
-Le mot de passe par défaut est 'ChangeMe123!' — à changer immédiatement
-après la première connexion via PATCH /api/v1/auth/password.
+Le mot de passe par défaut est 'AdminPwd!' — à changer immédiatement
+après la première connexion via PUT /api/v1/auth/password.
 """
 
 import asyncio
 import sys
 
-from pwdlib import PasswordHash
+from argon2 import PasswordHasher
 from sqlalchemy import select
 
-password_hash = PasswordHash.recommended()
+_hasher = PasswordHasher()
 
 DEFAULT_PASSWORD = "AdminPwd!"
 
@@ -50,17 +50,17 @@ async def seed() -> None:
                 full_name="Administrateur",
                 phone_number=settings.first_admin_phone,
                 email=settings.first_admin_email or None,
-                password_hash=password_hash.hash(DEFAULT_PASSWORD),
+                password_hash=_hasher.hash(settings.first_admin_password or DEFAULT_PASSWORD),
                 role=Role.ADMIN,
                 status=MemberStatus.ACTIVE,
             )
             db.add(admin)
-            print(f"✅ Administrateur créé :")
+            print("✅ Administrateur créé :")
             print(f"   Téléphone : {settings.first_admin_phone}")
             if settings.first_admin_email:
                 print(f"   Email     : {settings.first_admin_email}")
-            print(f"   Mot de passe : {DEFAULT_PASSWORD}")
-            print(f"   ⚠️  Changez ce mot de passe immédiatement !")
+            print(f"   Mot de passe : {settings.first_admin_password or DEFAULT_PASSWORD}")
+            print("   ⚠️  Changez ce mot de passe immédiatement !")
 
         # ── Crée les settings par défaut si absents ───────────────────────────
         settings_result = await db.execute(select(AssociationSettings))

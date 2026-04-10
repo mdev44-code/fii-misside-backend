@@ -5,12 +5,9 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    POETRY_NO_INTERACTION=1 \
-    POETRY_VENV_IN_PROJECT=1 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+    PYTHONPATH=/app
 
-# Installe Poetry
+# Installe Poetry (uniquement pour exporter les deps)
 RUN pip install poetry==1.8.3
 
 # Copie uniquement les fichiers de dépendances
@@ -20,11 +17,11 @@ COPY pyproject.toml poetry.lock* ./
 # ── Stage 2 : développement ───────────────────────────────────────────────────
 FROM base AS development
 
-# Installe TOUTES les dépendances dans /app/.venv
-RUN poetry install --no-root && rm -rf $POETRY_CACHE_DIR
-
-# Ajoute le venv au PATH → alembic, uvicorn... utilisables directement
-ENV PATH="/app/.venv/bin:$PATH"
+# Exporte les deps en requirements.txt et installe avec pip directement
+# → pip installe dans le Python système, PATH déjà correct
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-root \
+    && rm -rf /tmp/poetry_cache
 
 COPY . .
 
@@ -36,9 +33,9 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 # ── Stage 3 : production ──────────────────────────────────────────────────────
 FROM base AS production
 
-RUN poetry install --only=main --no-root && rm -rf $POETRY_CACHE_DIR
-
-ENV PATH="/app/.venv/bin:$PATH"
+RUN poetry config virtualenvs.create false \
+    && poetry install --only=main --no-root \
+    && rm -rf /tmp/poetry_cache
 
 COPY . .
 

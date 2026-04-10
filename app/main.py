@@ -159,6 +159,7 @@ def create_app() -> FastAPI:
     from app.domains.contributions.router import router as contributions_router
     from app.domains.members.router import router as members_router
     from app.domains.notifications.router import router as notifications_router
+    from app.domains.projects.router import router as projects_router
     from app.domains.treasury.router import router as treasury_router
 
     prefix = settings.api_prefix  # "/api/v1"
@@ -172,6 +173,11 @@ def create_app() -> FastAPI:
         members_router,
         prefix=f"{prefix}/members",
         tags=["Membres"],
+    )
+    app.include_router(
+        projects_router,
+        prefix=f"{prefix}/projects",
+        tags=["Projets"],
     )
     app.include_router(
         treasury_router,

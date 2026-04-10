@@ -1,41 +1,37 @@
 services:
-
-  # ── API FastAPI ─────────────────────────────────────────────────────────────
   app:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development     # utilise le stage dev (avec hot-reload)
+      target: development
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
-      - "8000:8000"           # localhost:8000 → container:8000
+      - "8000:8000"
     volumes:
-      - .:/app                # monte le code local → hot-reload
+      - .:/app          # monte le code — ne touche plus au venv dans /venv
     env_file:
-      - .env                  # charge toutes les variables d'environnement
+      - .env
     environment:
-      # Écrase les URLs pour pointer vers les services Docker (pas localhost)
       - DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/fii_misside_db
       - DATABASE_URL_SYNC=postgresql://postgres:password@postgres:5432/fii_misside_db
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       postgres:
-        condition: service_healthy   # attend que PostgreSQL soit prêt
+        condition: service_healthy
       redis:
-        condition: service_healthy   # attend que Redis soit prêt
+        condition: service_healthy
     restart: unless-stopped
 
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine       # image légère basée sur Alpine Linux
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: fii_misside_db
     ports:
-      - "5432:5432"                 # accès depuis ton IDE (TablePlus, DBeaver...)
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data  # données persistantes
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d fii_misside_db"]
       interval: 5s
@@ -44,13 +40,12 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # ── Redis ───────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data            # données persistantes entre redémarrages
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -58,8 +53,7 @@ services:
       retries: 5
     restart: unless-stopped
 
-# Volumes nommés : Docker les gère, données persistantes entre `docker compose down/up`
-# Pour tout réinitialiser : docker compose down -v
 volumes:
   postgres_data:
   redis_data:
+  # venv_data supprimé — le venv est dans /venv dans l'image, pas dans /app

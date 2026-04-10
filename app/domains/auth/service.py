@@ -2,19 +2,18 @@
 auth/service.py — Logique métier de l'authentification.
 
 Bibliothèques utilisées :
-  - pwdlib  : hashage des mots de passe (remplace passlib)
-              PasswordHash.recommended() → utilise Argon2 par défaut
-              (Argon2 est l'algorithme recommandé par OWASP, plus sécurisé que bcrypt)
-  - pyjwt   : tokens JWT (via infrastructure/security/jwt.py)
+  - argon2-cffi : hashage des mots de passe avec Argon2id
+  - pyjwt       : tokens JWT (via infrastructure/security/jwt.py)
 
-API pwdlib :
-  password_hash.hash("mon_mot_de_passe")        → "$argon2id$v=19$..."
-  password_hash.verify(hash_stocké, "mot_passe") → True ou False
+API argon2-cffi :
+  hasher.hash("mon_mot_de_passe")        → "$argon2id$v=19$..."
+  hasher.verify(hash_stocké, "mot_passe") → True ou lève une exception
 """
 
 from datetime import datetime, timezone
 
-from pwdlib import PasswordHash
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,11 +39,29 @@ from app.shared.exceptions import (
     UnauthorizedError,
 )
 
-# ── Initialisation de pwdlib ──────────────────────────────────────────────────
-# PasswordHash.recommended() configure Argon2 automatiquement avec les
-# paramètres recommandés (mémoire, itérations, parallélisme).
+# ── Initialisation d'argon2-cffi ─────────────────────────────────────────────
+# PasswordHasher() configure Argon2id avec les paramètres recommandés.
 # On crée une seule instance partagée dans tout le module.
-password_hash = PasswordHash.recommended()
+_hasher = PasswordHasher()
+
+
+def hash_password(password: str) -> str:
+    """Hash un mot de passe avec Argon2id."""
+    return _hasher.hash(password)
+
+
+def verify_password(stored_hash: str, password: str) -> bool:
+    """
+    Vérifie un mot de passe contre son hash.
+    Retourne False si le mot de passe est incorrect,
+    lève une exception si le hash est invalide.
+    """
+    try:
+        return _hasher.verify(stored_hash, password)
+    except VerifyMismatchError:
+        return False
+    except (VerificationError, InvalidHashError) as e:
+        raise ValueError(f"Hash invalide : {e}") from e
 
 
 class AuthService:
@@ -67,7 +84,7 @@ class AuthService:
         Étapes :
           1. Cherche le membre par téléphone ou email
           2. Vérifie que le compte est actif
-          3. Vérifie le mot de passe avec Argon2 (pwdlib)
+          3. Vérifie le mot de passe avec Argon2id
           4. Génère access_token + refresh_token (PyJWT)
           5. Stocke le refresh_token dans Redis
           6. Enregistre dans les audit_logs
@@ -80,9 +97,7 @@ class AuthService:
         if not member or not member.password_hash:
             raise UnauthorizedError("Identifiant ou mot de passe incorrect")
 
-        # password_hash.verify(hash_stocké, mot_de_passe_brut) → True/False
-        # Note : l'ordre des arguments est (hash, plain) chez pwdlib
-        if not password_hash.verify(member.password_hash, data.password):
+        if not verify_password(member.password_hash, data.password):
             raise UnauthorizedError("Identifiant ou mot de passe incorrect")
 
         if member.status != MemberStatus.ACTIVE:
@@ -219,8 +234,7 @@ class AuthService:
             raise InvalidTokenError("Invitation déjà utilisée ou membre introuvable.")
 
         member.full_name = data.full_name
-        # password_hash.hash(mot_de_passe_brut) → hash Argon2
-        member.password_hash = password_hash.hash(data.password)
+        member.password_hash = hash_password(data.password)
         member.status = MemberStatus.ACTIVE
         member.invitation_token = None
         member.joined_at = datetime.now(timezone.utc)
@@ -245,15 +259,15 @@ class AuthService:
         Change le mot de passe. Exige l'ancien pour confirmer l'identité.
         Révoque toutes les sessions existantes après le changement.
         """
-        if not password_hash.verify(member.password_hash, data.current_password):
+        if not verify_password(member.password_hash, data.current_password):
             raise UnauthorizedError("Mot de passe actuel incorrect")
 
-        if password_hash.verify(member.password_hash, data.new_password):
+        if verify_password(member.password_hash, data.new_password):
             raise BusinessRuleError(
                 "Le nouveau mot de passe doit être différent de l'ancien"
             )
 
-        member.password_hash = password_hash.hash(data.new_password)
+        member.password_hash = hash_password(data.new_password)
         await cache_delete(CacheKeys.refresh_token(str(member.id)))
         await self._log(member.id, AuditAction.UPDATE, "member", member.id, None)
 

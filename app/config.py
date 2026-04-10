@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     )
 
     # ── Application ───────────────────────────────────────────────────────────
-    app_name: str = "Association Village"
+    app_name: str = "Fii-Misside"
     app_version: str = "1.0.0"
     # Literal["a", "b"] signifie : seules ces valeurs sont acceptées
     environment: Literal["development", "staging", "production", "test"] = "development"
@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     # ── Admin initial ─────────────────────────────────────────────────────────
     first_admin_phone: str = ""
     first_admin_email: str = ""
+    first_admin_password: str = ""
 
     # ── Validators ───────────────────────────────────────────────────────────
     @field_validator("jwt_secret_key")

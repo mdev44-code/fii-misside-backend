@@ -38,7 +38,7 @@ email-validator = "^2.2.0"
 #                  remplace passlib qui n'est plus maintenu
 # python-multipart : permet de recevoir des formulaires (requis par FastAPI)
 pyjwt = "^2.9.0"
-pwdlib = { extras = ["argon2"], version = "^0.2.0" }
+argon2-cffi = "^23.1.0"
 python-multipart = "^0.0.12"
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
@@ -51,6 +51,9 @@ apscheduler = ">=3.10.0,<4.0.0"
 
 # ── Notifications SMS ─────────────────────────────────────────────────────────
 africastalking = "^1.2.3"
+
+# HTTP client (utilisé en prod pour le healthcheck)
+httpx = "^0.27.0"
 
 # ── Utilitaires ───────────────────────────────────────────────────────────────
 python-dateutil = "^2.9.0"

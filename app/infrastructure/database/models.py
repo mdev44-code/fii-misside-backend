@@ -142,7 +142,7 @@ class AssociationSettings(Base, UUIDMixin):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PROJECT — Les projets du village
+# PROJECT 
 # ─────────────────────────────────────────────────────────────────────────────
 class Project(Base, UUIDMixin, TimestampMixin):
     """
