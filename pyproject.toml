@@ -58,6 +58,7 @@ httpx = "^0.27.0"
 # ── Utilitaires ───────────────────────────────────────────────────────────────
 python-dateutil = "^2.9.0"
 pytz = "^2024.1"
+boto3 = "^1.34.0"
 
 [tool.poetry.group.dev.dependencies]
 # Outils de développement uniquement (pas installés en production)

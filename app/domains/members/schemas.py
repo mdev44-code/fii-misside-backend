@@ -78,55 +78,82 @@ class UpdateMemberStatusRequest(BaseModel):
         return v
 
 
+class UpdateProfileRequest(BaseModel):
+    """
+    Modification partielle du profil du membre connecté.
+ 
+    Tous les champs sont optionnels — on n'envoie que ce qu'on veut changer.
+    Pattern PATCH : seuls les champs présents dans le body sont modifiés.
+ 
+    Règles métier :
+      - full_name  : min 2 caractères, pas vide
+      - email      : format email valide, unicité vérifiée dans le service
+      - phone_number : unicité vérifiée dans le service
+ 
+    Exemple :
+      PATCH /api/v1/members/me
+      Body : {"email": "nouveau@email.com"}
+      → Seul l'email est modifié, le reste reste inchangé.
+    """
+    full_name: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+ 
+    @field_validator("full_name")
+    @classmethod
+    def name_not_empty(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if len(v) < 2:
+                raise ValueError("Le nom doit contenir au moins 2 caractères")
+        return v
+ 
+    @field_validator("phone_number")
+    @classmethod
+    def phone_not_empty(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if len(v) < 8:
+                raise ValueError("Le numéro de téléphone est invalide")
+        return v
+ 
+    @field_validator("email")
+    @classmethod
+    def email_format(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip().lower()
+            if "@" not in v or "." not in v:
+                raise ValueError("Format d'email invalide")
+        return v
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RESPONSES
 # ─────────────────────────────────────────────────────────────────────────────
 
 class MemberResponse(BaseModel):
-    """
-    Représentation publique d'un membre.
-
-    Champs absents intentionnellement :
-      - password_hash    : jamais exposé
-      - invitation_token : jamais exposé
-
-    from_model() est une méthode de classe (factory) qui construit
-    un MemberResponse à partir d'un objet Member SQLAlchemy.
-    C'est le pattern "classmethod factory" — très pratique pour éviter
-    de répéter la conversion dans chaque route.
-
-    Usage :
-        member = await db.get(Member, id)
-        return MemberResponse.from_model(member)
-    """
     id: str
     full_name: str
-    phone_number: str
     email: str | None
+    phone_number: str
     role: str
     status: str
+    profile_picture_url: str | None
     joined_at: str | None
-
+    created_at: str
+ 
     @classmethod
     def from_model(cls, member) -> "MemberResponse":
-        """
-        Convertit un objet SQLAlchemy Member en MemberResponse Pydantic.
-
-        Pourquoi convertir ? SQLAlchemy retourne des objets Python avec
-        des types spéciaux (UUID, datetime). Pydantic a besoin de types
-        standards (str, etc.) pour sérialiser en JSON.
-        """
         return cls(
             id=str(member.id),
             full_name=member.full_name,
-            phone_number=member.phone_number,
             email=member.email,
+            phone_number=member.phone_number,
             role=member.role,
             status=member.status,
-            joined_at=(
-                member.joined_at.isoformat()
-                if member.joined_at else None
-            ),
+            profile_picture_url=member.profile_picture_url,
+            joined_at=member.joined_at.isoformat() if member.joined_at else None,
+            created_at=member.created_at.isoformat(),
         )
 
 

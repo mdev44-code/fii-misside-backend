@@ -1,19 +1,3 @@
-"""
-contributions/service.py — Logique métier des cotisations.
-
-Ce service gère :
-  1. La déclaration d'une cotisation par un membre
-  2. Le rapport mensuel (qui a payé, qui n'a pas payé)
-  3. La liste des membres sans cotisation (utilisée par le cron job)
-  4. La gestion des paramètres de l'association (mode libre/fixe)
-
-Relation avec treasury/service.py :
-  Le service treasury confirme les cotisations (appelle _confirm_contribution).
-  Ce service les déclare et les consulte.
-  Les deux services ne s'appellent pas mutuellement — ils opèrent
-  sur les mêmes données BDD mais depuis des angles différents.
-"""
-
 import uuid
 from datetime import datetime, timezone
 
@@ -23,17 +7,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.domains.contributions.schemas import (
     AssociationSettingsResponse,
+    ContributionResponse,
     ContributionStatusResponse,
     DeclareContributionResponse,
     MonthlyReportResponse,
+    TreasurerAddContributionRequest,
+    TreasurerAddContributionRequest,
     UpdateAssociationSettingsRequest,
 )
 from app.infrastructure.database.models import (
     AssociationSettings,
     Contribution,
     Member,
+    TreasuryBalance,
+    Transaction,
 )
 from app.shared.enums import ContributionStatus, MemberStatus
+from app.shared.exceptions import BusinessRuleError, ConflictError, NotFoundError
 
 
 class ContributionService:
@@ -46,10 +36,6 @@ class ContributionService:
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _get_or_create_settings(self) -> AssociationSettings:
-        """
-        Récupère les paramètres de l'association (singleton).
-        Les crée avec les valeurs par défaut du .env si inexistants.
-        """
         result = await self._db.execute(select(AssociationSettings))
         asso_settings = result.scalar_one_or_none()
 
@@ -69,7 +55,6 @@ class ContributionService:
         return asso_settings
 
     async def get_settings(self) -> AssociationSettingsResponse:
-        """Retourne les paramètres actuels de l'association."""
         asso_settings = await self._get_or_create_settings()
 
         updated_by_name = None
@@ -100,13 +85,6 @@ class ContributionService:
         data: UpdateAssociationSettingsRequest,
         updated_by: Member,
     ) -> AssociationSettingsResponse:
-        """
-        Met à jour le mode de cotisation.
-        Seul l'admin peut faire ça (vérifié dans le router).
-
-        Exemple : passer de "free" à "fixed" à 5000 FCFA.
-        Les cotisations existantes ne sont pas modifiées (snapshot préservé).
-        """
         asso_settings = await self._get_or_create_settings()
 
         asso_settings.contribution_mode = data.contribution_mode
@@ -342,14 +320,6 @@ class ContributionService:
         month: int,
         year: int,
     ) -> list[Member]:
-        """
-        Retourne les membres actifs sans cotisation confirmée ce mois.
-        Utilisé par le cron job pour envoyer les rappels ciblés.
-
-        Sous-requête SQL :
-          Récupère les IDs des membres ayant une contribution CONFIRMED ce mois.
-          Puis sélectionne les membres actifs qui NE SONT PAS dans cette liste.
-        """
         from sqlalchemy import func
 
         # IDs des membres qui ont déjà cotisé ce mois
@@ -371,3 +341,176 @@ class ContributionService:
             )
         )
         return list(result.scalars().all())
+    
+    async def add_contribution_by_treasurer(
+        self,
+        data: TreasurerAddContributionRequest,
+        treasurer: Member,
+    ) -> ContributionResponse:
+        now = datetime.now(timezone.utc)
+ 
+        # Mois et année : courants par défaut, ou saisis par le comptable
+        month = data.contribution_month or now.month
+        year = data.contribution_year or now.year
+ 
+        # ── 1. Charge le membre ─────────────────────────────────────────────
+        member_result = await self._db.execute(
+            select(Member).where(Member.id == data.member_id)
+        )
+        target_member = member_result.scalar_one_or_none()
+        if not target_member:
+            raise NotFoundError("Membre introuvable")
+ 
+        # ── 2. Charge les settings ──────────────────────────────────────────
+        settings_result = await self._db.execute(select(AssociationSettings))
+        settings = settings_result.scalar_one_or_none()
+        if not settings:
+            raise BusinessRuleError(
+                "Les paramètres de l'association ne sont pas configurés. "
+                "Contactez l'administrateur."
+            )
+ 
+        contribution_mode = settings.contribution_mode  # "free" ou "fixed"
+ 
+        # ── 3. Détermine le montant selon le mode ───────────────────────────
+        if contribution_mode == "free":
+            if data.amount is None:
+                raise BusinessRuleError(
+                    "Le montant est obligatoire en mode de cotisation libre"
+                )
+            amount = data.amount
+            expected_amount = None
+        else:
+            # Mode fixed : montant défini dans les settings
+            if not settings.fixed_amount:
+                raise BusinessRuleError(
+                    "Le montant fixe n'est pas configuré dans les paramètres. "
+                    "Contactez l'administrateur."
+                )
+            amount = float(settings.fixed_amount)
+            expected_amount = float(settings.fixed_amount)
+ 
+        # ── 4. Vérifie l'unicité (un seul cotisation par membre/mois/année) ─
+        existing_result = await self._db.execute(
+            select(Contribution).where(
+                Contribution.member_id == data.member_id,
+                Contribution.contribution_month == month,
+                Contribution.contribution_year == year,
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing:
+            raise ConflictError(
+                f"{target_member.full_name} a déjà une cotisation enregistrée "
+                f"pour {month:02d}/{year}"
+            )
+ 
+        # ── 5. Charge le solde de la caisse ────────────────────────────────
+        balance_result = await self._db.execute(select(TreasuryBalance))
+        treasury = balance_result.scalar_one_or_none()
+        if not treasury:
+            raise BusinessRuleError(
+                "La caisse n'a pas encore été initialisée. "
+                "Veuillez d'abord initialiser la caisse."
+            )
+ 
+        new_balance = float(treasury.balance) + amount
+ 
+        # ── 6. Crée la transaction ──────────────────────────────────────────
+        transaction = Transaction(
+            amount=amount,
+            balance_after=new_balance,
+            member_id=target_member.id,
+            performed_by=treasurer.id,
+            status="confirmed",
+            description=(
+                f"Cotisation {target_member.full_name} — "
+                f"{month:02d}/{year}"
+            ),
+            performed_at=now,
+        )
+        transaction.type = "deposit"
+        self._db.add(transaction)
+        await self._db.flush()  # Génère transaction.id
+ 
+        # ── 7. Crée la cotisation ───────────────────────────────────────────
+        contribution = Contribution(
+            member_id=target_member.id,
+            transaction_id=transaction.id,
+            contribution_month=month,
+            contribution_year=year,
+            status="confirmed",
+            amount=amount,
+            expected_amount=expected_amount,
+            contribution_mode=contribution_mode,
+            declared_at=now,       # Déclaré et confirmé en même temps
+            confirmed_at=now,      # Immédiatement confirmé
+            recorded_at=now,       # Horodatage exact d'enregistrement
+            recorded_by=treasurer.id,
+        )
+        self._db.add(contribution)
+ 
+        # ── 8. Met à jour le solde de la caisse ─────────────────────────────
+        treasury.balance = new_balance
+ 
+        await self._db.flush()
+ 
+        return ContributionResponse.from_model(
+            contribution,
+            member_name=target_member.full_name,
+            recorded_by_name=treasurer.full_name,
+        )
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # LIST CONTRIBUTIONS — Historique
+    # ─────────────────────────────────────────────────────────────────────────
+ 
+    async def list_contributions(
+        self,
+        member_id: str | None = None,
+        month: int | None = None,
+        year: int | None = None,
+    ) -> list[ContributionResponse]:
+        """
+        Liste les cotisations avec filtres optionnels.
+        Chargement des noms de membre et comptable via jointures.
+        """
+        from sqlalchemy.orm import joinedload
+ 
+        query = select(Contribution).options(
+            joinedload(Contribution.member),
+            joinedload(Contribution.recorder),
+        )
+ 
+        if member_id:
+            query = query.where(Contribution.member_id == member_id)
+        if month:
+            query = query.where(Contribution.contribution_month == month)
+        if year:
+            query = query.where(Contribution.contribution_year == year)
+ 
+        query = query.order_by(
+            Contribution.contribution_year.desc(),
+            Contribution.contribution_month.desc(),
+        )
+ 
+        result = await self._db.execute(query)
+        contributions = result.unique().scalars().all()
+ 
+        return [
+            ContributionResponse.from_model(
+                c,
+                member_name=c.member.full_name if c.member else "",
+                recorded_by_name=c.recorder.full_name if c.recorder else None,
+            )
+            for c in contributions
+        ]
+ 
+    # ─────────────────────────────────────────────────────────────────────────
+    # GET MY CONTRIBUTIONS — Cotisations du membre connecté
+    # ─────────────────────────────────────────────────────────────────────────
+ 
+    async def get_my_contributions(self, member: Member) -> list[ContributionResponse]:
+        return await self.list_contributions(member_id=str(member.id))
+ 
+ 

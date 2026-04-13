@@ -1,16 +1,3 @@
-"""
-shared/enums.py — Valeurs fixes autorisées dans le domaine métier.
-
-StrEnum : chaque membre est à la fois un Enum ET une string Python.
-Avantage : Role.ADMIN == "admin" retourne True sans conversion.
-C'est important pour SQLAlchemy qui stocke des strings en base.
-
-Toutes les énumérations sont ici pour :
-1. Avoir une vue d'ensemble du domaine en un seul endroit
-2. Éviter les strings "magiques" dispersées dans le code
-3. Permettre à l'IDE de t'aider avec l'autocomplétion
-"""
-
 from enum import StrEnum
 
 
@@ -19,18 +6,6 @@ from enum import StrEnum
 # ─────────────────────────────────────────────────────────────────────────────
 
 class Role(StrEnum):
-    """
-    Les rôles définissent ce qu'un membre peut faire dans l'application.
-
-    ADMIN     : accès total — gère les membres, les rôles, tout
-    TREASURER : gère la caisse (dépôts, dépenses, confirmation cotisations)
-    MANAGER   : crée et gère les projets
-    MEMBER    : peut voir les infos et déclarer ses cotisations
-
-    Un admin peut aussi faire ce que fait un treasurer ou un manager.
-    Ces rôles ne sont pas exclusifs — on peut cumuler treasurer + manager
-    sur la même personne si besoin (ex: dans une petite asso).
-    """
     ADMIN = "admin"
     TREASURER = "treasurer"
     MANAGER = "manager"
@@ -38,14 +13,6 @@ class Role(StrEnum):
 
 
 class MemberStatus(StrEnum):
-    """
-    Le cycle de vie d'un membre :
-
-    PENDING   → invitation envoyée, le membre n'a pas encore créé son compte
-    ACTIVE    → compte créé, membre actif
-    INACTIVE  → membre parti ou désactivé temporairement
-    SUSPENDED → suspendu par l'admin (accès bloqué)
-    """
     PENDING = "pending"
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -57,17 +24,6 @@ class MemberStatus(StrEnum):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ProjectStatus(StrEnum):
-    """
-    Le cycle de vie d'un projet :
-
-    DRAFT       → idée créée, pas encore démarrée (budget peut être null)
-    IN_PROGRESS → projet en cours (budget obligatoire à ce stade)
-    COMPLETED   → projet terminé
-    CANCELLED   → projet annulé
-
-    La règle métier : on ne peut pas passer à IN_PROGRESS sans budget défini.
-    Cette vérification est faite dans le service, pas ici.
-    """
     DRAFT = "draft"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -79,26 +35,12 @@ class ProjectStatus(StrEnum):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TransactionType(StrEnum):
-    """
-    Les trois types de mouvements financiers :
-
-    DEPOSIT    → argent qui rentre (cotisation confirmée par le comptable)
-    EXPENSE    → argent qui sort (dépense enregistrée après retrait Wave physique)
-    ADJUSTMENT → correction manuelle (initialisation de la caisse ou rectification)
-    """
     DEPOSIT = "deposit"
     EXPENSE = "expense"
     ADJUSTMENT = "adjustment"
 
 
 class TransactionStatus(StrEnum):
-    """
-    Le statut d'une transaction :
-
-    CONFIRMED        → transaction validée et enregistrée (cas normal)
-    PENDING_APPROVAL → dépense importante en attente de validation du président
-    REJECTED         → dépense refusée par le président
-    """
     CONFIRMED = "confirmed"
     PENDING_APPROVAL = "pending_approval"
     REJECTED = "rejected"

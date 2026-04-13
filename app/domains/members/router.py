@@ -1,27 +1,4 @@
-"""
-members/router.py — Endpoints HTTP pour la gestion des membres.
-
-Contrôle d'accès par route :
-  GET  /members              → tous les membres connectés (voir la liste)
-  GET  /members/org-chart    → tous les membres connectés (voir l'organigramme)
-  GET  /members/{id}         → tous les membres connectés
-  POST /members/invite       → admin uniquement
-  PATCH /members/{id}/role   → admin uniquement
-  PATCH /members/{id}/status → admin uniquement
-
-Deux façons d'appliquer le contrôle d'accès dans FastAPI :
-
-  1. Via dependencies= dans le décorateur (route entière protégée)
-     @router.post("/invite", dependencies=[Depends(require_admin)])
-     → FastAPI exécute require_admin AVANT d'appeler la fonction
-     → Si le rôle est incorrect → 403 automatique, la fonction n'est pas appelée
-
-  2. Via un paramètre dans la fonction (si on a besoin du résultat)
-     async def ma_route(admin: Member = Depends(require_admin)):
-     → Même protection + le membre admin est disponible dans la fonction
-"""
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_member
@@ -29,14 +6,117 @@ from app.domains.members.schemas import (
     InviteMemberRequest,
     UpdateMemberRoleRequest,
     UpdateMemberStatusRequest,
+    UpdateProfileRequest,
 )
 from app.domains.members.service import MemberService
 from app.infrastructure.database.session import get_db
 from app.infrastructure.security.permissions import require_admin
+from app.shared.exceptions import BusinessRuleError
 from app.shared.response import success_response
 
 router = APIRouter()
 
+# Taille max d'upload : 5 Mo
+MAX_UPLOAD_SIZE = 5 * 1024 * 1024
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /members/me — Profil du membre connecté
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/me")
+async def get_my_profile(
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne le profil complet du membre connecté.
+    Inclut : nom, email, téléphone, rôle, statut, photo de profil.
+    """
+    service = MemberService(db)
+    profile = await service.get_me(current_member)
+    return success_response(data=profile.model_dump(), message="Profil chargé")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATCH /members/me — Modifier son profil
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.patch("/me")
+async def update_my_profile(
+    data: UpdateProfileRequest,
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Modifie le profil du membre connecté.
+    Seuls les champs envoyés dans le body sont modifiés (PATCH partiel).
+
+    Champs modifiables :
+      - full_name    : nom complet
+      - email        : adresse email (unicité vérifiée)
+      - phone_number : numéro de téléphone (unicité vérifiée)
+    """
+    service = MemberService(db)
+    updated = await service.update_profile(current_member, data)
+    await db.commit()
+    return success_response(
+        data=updated.model_dump(),
+        message="Profil mis à jour avec succès",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /members/me/avatar — Uploader sa photo de profil
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/me/avatar")
+async def upload_my_avatar(
+    file: UploadFile = File(..., description="Image JPG, PNG ou WebP, max 5 Mo"),
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upload une photo de profil vers AWS S3.
+
+    Formats acceptés : JPG, JPEG, PNG, WebP
+    Taille maximum   : 5 Mo
+
+    La photo est stockée dans S3 sous la clé :
+      profiles/{member_id}/{uuid}.{ext}
+
+    L'ancienne photo est automatiquement supprimée de S3 si elle existe.
+    Retourne le profil mis à jour avec la nouvelle URL de la photo.
+    """
+    file_content = await file.read()
+
+    if len(file_content) > MAX_UPLOAD_SIZE:
+        raise BusinessRuleError("La photo ne doit pas dépasser 5 Mo")
+
+    if len(file_content) == 0:
+        raise BusinessRuleError("Le fichier est vide")
+
+    content_type = file.content_type or "application/octet-stream"
+    filename = file.filename or "avatar"
+
+    service = MemberService(db)
+    updated = await service.upload_avatar(
+        member=current_member,
+        file_content=file_content,
+        content_type=content_type,
+        filename=filename,
+    )
+    await db.commit()
+
+    return success_response(
+        data=updated.model_dump(),
+        message="Photo de profil mise à jour avec succès",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /members/org-chart — Organigramme
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/org-chart")
 async def get_org_chart(
@@ -56,23 +136,30 @@ async def get_org_chart(
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /members — Liste de tous les membres
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.get("")
 async def list_members(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Liste tous les membres de l'association.
+    Liste tous les membres actifs de l'association.
     Accessible à tous les membres connectés.
     """
     service = MemberService(db)
     members = await service.get_all_members()
-
     return success_response(
         data=[m.model_dump() for m in members],
         message=f"{len(members)} membre(s) trouvé(s)",
     )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /members/invite — Inviter un membre
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/invite", dependencies=[Depends(require_admin)])
 async def invite_member(
@@ -85,9 +172,6 @@ async def invite_member(
     Réservé aux administrateurs.
 
     Retourne le lien d'invitation à partager par WhatsApp/SMS.
-
-    Note : on passe current_member au service car on en a besoin
-    pour l'audit log (qui a créé cette invitation ?).
     """
     service = MemberService(db)
     result = await service.invite_member(data, invited_by=current_member)
@@ -97,6 +181,10 @@ async def invite_member(
         message=result.message,
     )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routes dynamiques /{member_id} — TOUJOURS EN DERNIER
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/{member_id}")
 async def get_member(

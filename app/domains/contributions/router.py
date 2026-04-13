@@ -1,24 +1,13 @@
-"""
-contributions/router.py — Endpoints HTTP pour les cotisations.
-
-Routes :
-  POST /contributions/declare           → membre (déclare sa cotisation)
-  GET  /contributions/status            → tous (rapport du mois courant)
-  GET  /contributions/status?month=&year= → tous (rapport d'un mois précis)
-  GET  /contributions/settings          → tous (voir le mode actuel)
-  PATCH /contributions/settings         → admin uniquement
-"""
-
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_member
-from app.domains.contributions.schemas import UpdateAssociationSettingsRequest
+from app.domains.contributions.schemas import TreasurerAddContributionRequest, UpdateAssociationSettingsRequest
 from app.domains.contributions.service import ContributionService
 from app.infrastructure.database.session import get_db
-from app.infrastructure.security.permissions import require_admin
+from app.infrastructure.security.permissions import require_admin, require_treasurer
 from app.shared.response import success_response
 
 router = APIRouter()
@@ -29,13 +18,6 @@ async def declare_contribution(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Le membre déclare qu'il a envoyé sa cotisation via Wave.
-
-    Retourne le numéro Wave du comptable et le montant à envoyer
-    (si mode fixe). Le membre peut appeler cette route plusieurs fois —
-    le résultat est idempotent (pas de doublon créé).
-    """
     service = ContributionService(db)
     result = await service.declare_contribution(current_member)
 
@@ -52,16 +34,6 @@ async def get_monthly_status(
     month: int | None = Query(default=None, ge=1, le=12),
     year: int | None = Query(default=None, ge=2020),
 ):
-    """
-    Rapport des cotisations pour un mois donné.
-    Par défaut : mois courant.
-
-    Accessible à tous les membres — transparence totale.
-
-    Paramètres URL optionnels :
-      ?month=6&year=2025 → rapport de juin 2025
-      (sans paramètres)  → mois courant
-    """
     now = datetime.now(timezone.utc)
     target_month = month or now.month
     target_year = year or now.year
@@ -84,10 +56,6 @@ async def get_settings(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Retourne les paramètres actuels de cotisation.
-    Accessible à tous les membres.
-    """
     service = ContributionService(db)
     settings = await service.get_settings()
 
@@ -100,14 +68,6 @@ async def update_settings(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Met à jour le mode de cotisation.
-    Réservé aux administrateurs.
-
-    Exemple : passer en mode fixe à 5 000 FCFA :
-      PATCH /contributions/settings
-      Body : { "contribution_mode": "fixed", "fixed_amount": 5000 }
-    """
     service = ContributionService(db)
     result = await service.update_settings(data, updated_by=current_member)
 
@@ -120,3 +80,82 @@ async def update_settings(
         data=result.model_dump(),
         message=message,
     )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /contributions — Enregistrement d'une cotisation (comptable uniquement)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("", dependencies=[Depends(require_treasurer)])
+async def add_contribution(
+    data: TreasurerAddContributionRequest,
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ContributionService(db)
+    contribution = await service.add_contribution_by_treasurer(
+        data=data,
+        treasurer=current_member,
+    )
+    await db.commit()
+ 
+    return success_response(
+        data=contribution.model_dump(),
+        message=(
+            f"Cotisation de {contribution.member_name} enregistrée "
+            f"pour {contribution.contribution_month:02d}/{contribution.contribution_year}"
+        ),
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /contributions/me — Mes cotisations
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@router.get("/me")
+async def get_my_contributions(
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    service = ContributionService(db)
+    contributions = await service.get_my_contributions(current_member)
+ 
+    return success_response(
+        data=[c.model_dump() for c in contributions],
+        message=f"{len(contributions)} cotisation(s) trouvée(s)",
+    )
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /contributions — Toutes les cotisations (avec filtres)
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@router.get("")
+async def list_contributions(
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+    member_id: str | None = Query(
+        default=None,
+        description="Filtrer par membre (UUID)",
+    ),
+    month: int | None = Query(
+        default=None,
+        ge=1, le=12,
+        description="Filtrer par mois (1-12)",
+    ),
+    year: int | None = Query(
+        default=None,
+        ge=2020, le=2100,
+        description="Filtrer par année (ex: 2026)",
+    ),
+):
+    service = ContributionService(db)
+    contributions = await service.list_contributions(
+        member_id=member_id,
+        month=month,
+        year=year,
+    )
+ 
+    return success_response(
+        data=[c.model_dump() for c in contributions],
+        message=f"{len(contributions)} cotisation(s) trouvée(s)",
+    )
+ 

@@ -9,7 +9,7 @@ est manquante, l'application refuse de démarrer avec un message clair.
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     contribution_reminder_start_day: int = 1
     contribution_reminder_end_day: int = 15
     contribution_reminder_hour: int = 9
+
+    # ── AWS S3 ────────────────────────────────────────────────────────────────────
+    aws_access_key_id: str = Field(default="", env="AWS_ACCESS_KEY_ID")
+    aws_secret_access_key: str = Field(default="", env="AWS_SECRET_ACCESS_KEY")
+    aws_s3_bucket_name: str = Field(default="", env="AWS_S3_BUCKET_NAME")
+    aws_s3_region: str = Field(default="eu-west-3", env="AWS_S3_REGION")
+    aws_s3_endpoint_url: str | None = Field(default=None, env="AWS_S3_ENDPOINT_URL")
 
     # ── Wave ──────────────────────────────────────────────────────────────────
     wave_treasurer_number: str = ""

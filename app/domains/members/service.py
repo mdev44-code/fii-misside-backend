@@ -26,6 +26,7 @@ from app.domains.members.schemas import (
     MemberResponse,
     OrgChartMemberResponse,
     OrgChartResponse,
+    UpdateProfileRequest
 )
 from app.infrastructure.cache.redis import CacheKeys, cache_set
 from app.infrastructure.database.models import AuditLog, Member
@@ -36,6 +37,7 @@ from app.shared.exceptions import (
     ForbiddenError,
     NotFoundError,
 )
+from app.infrastructure.storage.s3 import delete_profile_picture, upload_profile_picture
 
 
 class MemberService:
@@ -137,17 +139,13 @@ class MemberService:
     # ─────────────────────────────────────────────────────────────────────────
     # LECTURE
     # ─────────────────────────────────────────────────────────────────────────
-
     async def get_all_members(self) -> list[MemberResponse]:
         """
-        Retourne tous les membres triés par nom.
-
-        scalars() : extrait les objets Member de la liste de tuples
-                    que SQLAlchemy retourne par défaut.
-        all()     : consomme le générateur et retourne une liste Python.
+        Retourne la liste de tous les membres actifs.
+        Utilisé par le comptable pour sélectionner le membre lors d'une cotisation.
         """
         result = await self._db.execute(
-            select(Member).order_by(Member.full_name)
+            select(Member).where(Member.status == "active").order_by(Member.full_name)
         )
         members = result.scalars().all()
         return [MemberResponse.from_model(m) for m in members]
@@ -370,3 +368,107 @@ class MemberService:
             new_values=new_values,
         )
         self._db.add(log)
+
+        # ─────────────────────────────────────────────────────────────────────────
+    # GET ME — Profil du membre connecté
+    # ─────────────────────────────────────────────────────────────────────────
+ 
+    async def get_me(self, member: Member) -> MemberResponse:
+        """Retourne le profil du membre connecté."""
+        return MemberResponse.from_model(member)
+ 
+    # ─────────────────────────────────────────────────────────────────────────
+    # UPDATE PROFILE — Modification du profil
+    # ─────────────────────────────────────────────────────────────────────────
+ 
+    async def update_profile(
+        self,
+        member: Member,
+        data: UpdateProfileRequest,
+    ) -> MemberResponse:
+        """
+        Modifie le profil du membre connecté.
+ 
+        Seuls les champs envoyés sont mis à jour (pattern PATCH).
+        Vérifie l'unicité de l'email et du téléphone avant modification.
+ 
+        Règles métier :
+          - Un membre ne peut pas prendre le téléphone ou l'email d'un autre
+          - Le nom peut être modifié librement
+        """
+        # Vérification unicité email
+        if data.email is not None and data.email != member.email:
+            existing = await self._db.execute(
+                select(Member).where(
+                    Member.email == data.email,
+                    Member.id != member.id,
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise ConflictError("Cet email est déjà utilisé par un autre membre")
+ 
+        # Vérification unicité téléphone
+        if data.phone_number is not None and data.phone_number != member.phone_number:
+            existing = await self._db.execute(
+                select(Member).where(
+                    Member.phone_number == data.phone_number,
+                    Member.id != member.id,
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise ConflictError(
+                    "Ce numéro de téléphone est déjà utilisé par un autre membre"
+                )
+ 
+        # Application des modifications
+        if data.full_name is not None:
+            member.full_name = data.full_name
+        if data.email is not None:
+            member.email = data.email
+        if data.phone_number is not None:
+            member.phone_number = data.phone_number
+ 
+        await self._db.flush()
+        return MemberResponse.from_model(member)
+ 
+    # ─────────────────────────────────────────────────────────────────────────
+    # UPLOAD AVATAR — Photo de profil vers S3
+    # ─────────────────────────────────────────────────────────────────────────
+ 
+    async def upload_avatar(
+        self,
+        member: Member,
+        file_content: bytes,
+        content_type: str,
+        filename: str,
+    ) -> MemberResponse:
+        """
+        Upload une nouvelle photo de profil vers AWS S3.
+ 
+        Workflow :
+          1. Valide le fichier (taille, format)
+          2. Upload vers S3 dans profiles/{member_id}/{uuid}.ext
+          3. Supprime l'ancienne photo S3 si elle existe
+          4. Met à jour profile_picture_url en BDD
+ 
+        Returns:
+            Le profil mis à jour avec la nouvelle URL de photo
+        """
+        # Supprimer l'ancienne photo si elle existe
+        old_url = member.profile_picture_url
+        if old_url:
+            await delete_profile_picture(old_url)
+ 
+        # Upload de la nouvelle photo
+        new_url = await upload_profile_picture(
+            member_id=str(member.id),
+            file_content=file_content,
+            content_type=content_type,
+            filename=filename,
+        )
+ 
+        # Mise à jour en BDD
+        member.profile_picture_url = new_url
+        await self._db.flush()
+ 
+        return MemberResponse.from_model(member)
