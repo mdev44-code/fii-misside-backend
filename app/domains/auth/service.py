@@ -1,15 +1,15 @@
 """
 auth/service.py — Logique métier de l'authentification.
 
-Bibliothèques utilisées :
-  - argon2-cffi : hashage des mots de passe avec Argon2id
-  - pyjwt       : tokens JWT (via infrastructure/security/jwt.py)
-
-API argon2-cffi :
-  hasher.hash("mon_mot_de_passe")        → "$argon2id$v=19$..."
-  hasher.verify(hash_stocké, "mot_passe") → True ou lève une exception
+Corrections v3 :
+  - register_from_invite : ne rappelle plus login() après flush() car le membre
+    n'est pas encore commis en BDD → génère les tokens directement depuis
+    l'objet membre en mémoire, comme le fait login() mais sans requête BDD.
+  - validate_group_token : nouvelle méthode pour vérifier un token de groupe.
+  - Imports : ajout RegisterFromGroupRequest et Role.
 """
 
+import json
 from datetime import datetime, timezone
 
 from argon2 import PasswordHasher
@@ -21,6 +21,7 @@ from app.config import settings
 from app.domains.auth.schemas import (
     ChangePasswordRequest,
     LoginRequest,
+    RegisterFromGroupRequest,
     RegisterFromInviteRequest,
     TokenResponse,
 )
@@ -31,31 +32,23 @@ from app.infrastructure.security.jwt import (
     create_refresh_token,
     decode_token,
 )
-from app.shared.enums import AuditAction, MemberStatus
+from app.shared.enums import AuditAction, MemberStatus, Role
 from app.shared.exceptions import (
     BusinessRuleError,
+    ConflictError,
     InvalidTokenError,
     NotFoundError,
     UnauthorizedError,
 )
 
-# ── Initialisation d'argon2-cffi ─────────────────────────────────────────────
-# PasswordHasher() configure Argon2id avec les paramètres recommandés.
-# On crée une seule instance partagée dans tout le module.
 _hasher = PasswordHasher()
 
 
 def hash_password(password: str) -> str:
-    """Hash un mot de passe avec Argon2id."""
     return _hasher.hash(password)
 
 
 def verify_password(stored_hash: str, password: str) -> bool:
-    """
-    Vérifie un mot de passe contre son hash.
-    Retourne False si le mot de passe est incorrect,
-    lève une exception si le hash est invalide.
-    """
     try:
         return _hasher.verify(stored_hash, password)
     except VerifyMismatchError:
@@ -78,82 +71,35 @@ class AuthService:
         data: LoginRequest,
         ip_address: str | None = None,
     ) -> TokenResponse:
-        """
-        Connecte un membre et retourne ses tokens JWT.
-
-        Étapes :
-          1. Cherche le membre par téléphone ou email
-          2. Vérifie que le compte est actif
-          3. Vérifie le mot de passe avec Argon2id
-          4. Génère access_token + refresh_token (PyJWT)
-          5. Stocke le refresh_token dans Redis
-          6. Enregistre dans les audit_logs
-
-        Sécurité : même message d'erreur si le membre n'existe pas
-        ou si le mot de passe est faux → ne révèle pas si le numéro est enregistré.
-        """
         member = await self._get_by_identifier(data.identifier)
-
-        if not member or not member.password_hash:
-            raise UnauthorizedError("Identifiant ou mot de passe incorrect")
-
-        if not verify_password(member.password_hash, data.password):
+        if not member:
             raise UnauthorizedError("Identifiant ou mot de passe incorrect")
 
         if member.status != MemberStatus.ACTIVE:
             raise UnauthorizedError(
-                "Votre compte est inactif. Contactez l'administrateur."
+                "Votre compte est inactif ou suspendu. Contactez l'administrateur."
             )
 
-        access_token = create_access_token(
-            subject=str(member.id),
-            extra_claims={
-                "role": member.role,
-                "name": member.full_name,
-            },
-        )
-        refresh_token = create_refresh_token(subject=str(member.id))
+        if not verify_password(member.password_hash, data.password):
+            raise UnauthorizedError("Identifiant ou mot de passe incorrect")
 
-        ttl = settings.jwt_refresh_token_expire_days * 86_400
-        await cache_set(
-            key=CacheKeys.refresh_token(str(member.id)),
-            value=refresh_token,
-            ttl_seconds=ttl,
-        )
-
+        tokens = await self._create_tokens_for(member)
         await self._log(member.id, AuditAction.LOGIN, "member", member.id, ip_address)
-
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            member_id=str(member.id),
-            full_name=member.full_name,
-            role=member.role,
-        )
+        return tokens
 
     # ─────────────────────────────────────────────────────────────────────────
-    # REFRESH TOKEN
+    # REFRESH
     # ─────────────────────────────────────────────────────────────────────────
 
     async def refresh(self, refresh_token: str) -> TokenResponse:
-        """
-        Renouvelle l'access token à partir d'un refresh token valide.
-
-        Rotation du refresh token : on génère un NOUVEAU refresh token
-        à chaque appel. L'ancien est écrasé dans Redis.
-        → Un refresh token ne peut être utilisé qu'une seule fois.
-        """
-        payload = decode_token(refresh_token, expected_type="refresh")
+        payload   = decode_token(refresh_token, expected_type="refresh")
         member_id = payload.get("sub")
-
         if not member_id:
             raise InvalidTokenError()
 
         stored_token = await cache_get(CacheKeys.refresh_token(member_id))
         if stored_token != refresh_token:
-            raise InvalidTokenError(
-                "Refresh token révoqué. Veuillez vous reconnecter."
-            )
+            raise InvalidTokenError("Refresh token révoqué. Veuillez vous reconnecter.")
 
         result = await self._db.execute(
             select(Member).where(Member.id == member_id)
@@ -162,49 +108,23 @@ class AuthService:
         if not member:
             raise NotFoundError("Membre")
 
-        new_access = create_access_token(
-            subject=str(member.id),
-            extra_claims={"role": member.role, "name": member.full_name},
-        )
-        new_refresh = create_refresh_token(subject=str(member.id))
-
-        ttl = settings.jwt_refresh_token_expire_days * 86_400
-        await cache_set(
-            key=CacheKeys.refresh_token(str(member.id)),
-            value=new_refresh,
-            ttl_seconds=ttl,
-        )
-
-        return TokenResponse(
-            access_token=new_access,
-            refresh_token=new_refresh,
-            member_id=str(member.id),
-            full_name=member.full_name,
-            role=member.role,
-        )
+        return await self._create_tokens_for(member)
 
     # ─────────────────────────────────────────────────────────────────────────
     # LOGOUT
     # ─────────────────────────────────────────────────────────────────────────
 
     async def logout(self, member_id: str, ip_address: str | None = None) -> None:
-        """
-        Révoque le refresh token en le supprimant de Redis.
-        L'access token reste valide jusqu'à expiration (max 1h).
-        """
         await cache_delete(CacheKeys.refresh_token(member_id))
-
         result = await self._db.execute(
             select(Member).where(Member.id == member_id)
         )
         member = result.scalar_one_or_none()
         if member:
-            await self._log(
-                member.id, AuditAction.LOGOUT, "member", member.id, ip_address
-            )
+            await self._log(member.id, AuditAction.LOGOUT, "member", member.id, ip_address)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # INSCRIPTION DEPUIS INVITATION
+    # INSCRIPTION DEPUIS INVITATION PERSONNELLE (v3 — sans appel à login())
     # ─────────────────────────────────────────────────────────────────────────
 
     async def register_from_invite(
@@ -212,39 +132,183 @@ class AuthService:
         data: RegisterFromInviteRequest,
     ) -> TokenResponse:
         """
-        Crée le compte depuis un lien d'invitation.
-        Double vérification : Redis (token non expiré) + BDD (statut PENDING).
+        Crée le compte depuis une invitation personnelle (one-time token).
+
+        IMPORTANT : on ne rappelle PAS self.login() après flush() car le membre
+        n'est pas encore commis en BDD à ce stade — _get_by_identifier() ne le
+        trouverait pas et retournerait None → UnauthorizedError.
+
+        On génère les tokens directement depuis l'objet membre en mémoire
+        via _create_tokens_for(), exactement comme login() mais sans requête BDD.
         """
-        cached_member_id = await cache_get(CacheKeys.invitation_token(data.token))
-        if not cached_member_id:
+        # 1. Vérifie et décode le token Redis
+        cached_value = await cache_get(CacheKeys.invitation_token(data.token))
+        if not cached_value:
             raise InvalidTokenError(
                 "Ce lien d'invitation est invalide ou a expiré. "
                 "Demandez un nouveau lien à l'administrateur."
             )
 
-        result = await self._db.execute(
-            select(Member).where(
-                Member.invitation_token == data.token,
-                Member.status == MemberStatus.PENDING,
+        try:
+            token_data = json.loads(cached_value)
+        except (json.JSONDecodeError, TypeError):
+            raise InvalidTokenError("Token d'invitation corrompu.")
+
+        if token_data.get("type") != "personal":
+            raise InvalidTokenError(
+                "Ce lien est un lien groupé. Utilisez le bon format d'URL."
             )
+
+        try:
+            role = Role(token_data.get("role", "member"))
+        except ValueError:
+            role = Role.MEMBER
+
+        # 2. Unicité téléphone
+        existing_phone = await self._db.execute(
+            select(Member).where(Member.phone_number == data.phone_number)
         )
-        member = result.scalar_one_or_none()
+        if existing_phone.scalar_one_or_none():
+            raise ConflictError(
+                f"Un compte avec le numéro {data.phone_number} existe déjà."
+            )
 
-        if not member:
-            raise InvalidTokenError("Invitation déjà utilisée ou membre introuvable.")
+        # 3. Unicité email
+        if data.email:
+            existing_email = await self._db.execute(
+                select(Member).where(Member.email == data.email)
+            )
+            if existing_email.scalar_one_or_none():
+                raise ConflictError(
+                    f"Un compte avec l'email {data.email} existe déjà."
+                )
 
-        member.full_name = data.full_name
-        member.password_hash = hash_password(data.password)
-        member.status = MemberStatus.ACTIVE
-        member.invitation_token = None
-        member.joined_at = datetime.now(timezone.utc)
+        # 4. Crée le membre
+        member = Member(
+            full_name=data.full_name,
+            phone_number=data.phone_number,
+            email=data.email,
+            role=role,
+            status=MemberStatus.ACTIVE,
+            password_hash=hash_password(data.password),
+            invitation_token=None,
+            joined_at=datetime.now(timezone.utc),
+        )
+        self._db.add(member)
+        await self._db.flush()  # génère l'UUID sans commit
 
-        await self._db.flush()
+        # 5. Invalide le token (one-time use)
         await cache_delete(CacheKeys.invitation_token(data.token))
 
-        return await self.login(
-            LoginRequest(identifier=member.phone_number, password=data.password)
+        # 6. Génère les tokens DIRECTEMENT depuis l'objet en mémoire
+        # (pas de requête BDD → pas de problème de visibilité pré-commit)
+        tokens = await self._create_tokens_for(member)
+        await self._log(member.id, AuditAction.CREATE, "member", member.id)
+
+        return tokens
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # INSCRIPTION DEPUIS INVITATION GROUPÉE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def register_from_group(
+        self,
+        data: RegisterFromGroupRequest,
+    ) -> TokenResponse:
+        """
+        Crée un compte depuis un lien groupé (réutilisable).
+        Le token de groupe N'EST PAS supprimé après l'inscription.
+        """
+        cached_value = await cache_get(CacheKeys.group_invite_token(data.group_token))
+        if not cached_value:
+            raise InvalidTokenError(
+                "Ce lien d'invitation groupée est invalide ou a expiré."
+            )
+
+        try:
+            token_data = json.loads(cached_value)
+        except (json.JSONDecodeError, TypeError):
+            raise InvalidTokenError("Token de groupe corrompu.")
+
+        try:
+            role = Role(token_data.get("role", "member"))
+        except ValueError:
+            role = Role.MEMBER
+
+        # Unicité téléphone
+        existing_phone = await self._db.execute(
+            select(Member).where(Member.phone_number == data.phone_number)
         )
+        if existing_phone.scalar_one_or_none():
+            raise ConflictError(
+                f"Un compte avec le numéro {data.phone_number} existe déjà."
+            )
+
+        if data.email:
+            existing_email = await self._db.execute(
+                select(Member).where(Member.email == data.email)
+            )
+            if existing_email.scalar_one_or_none():
+                raise ConflictError(
+                    f"Un compte avec l'email {data.email} existe déjà."
+                )
+
+        member = Member(
+            full_name=data.full_name,
+            phone_number=data.phone_number,
+            email=data.email,
+            role=role,
+            status=MemberStatus.ACTIVE,
+            password_hash=hash_password(data.password),
+            invitation_token=None,
+            joined_at=datetime.now(timezone.utc),
+        )
+        self._db.add(member)
+        await self._db.flush()
+
+        # Token de groupe NON supprimé → réutilisable
+        tokens = await self._create_tokens_for(member)
+        await self._log(member.id, AuditAction.CREATE, "member", member.id)
+
+        return tokens
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # VALIDATION TOKEN DE GROUPE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def validate_group_token(self, token: str) -> dict:
+        """
+        Vérifie qu'un token de groupe est valide et retourne ses infos.
+        Appelé par GET /auth/group-invite/{token} avant l'affichage du formulaire.
+        """
+        cached_value = await cache_get(CacheKeys.group_invite_token(token))
+        if not cached_value:
+            return {
+                "is_valid": False,
+                "message": "Ce lien d'invitation est invalide ou a expiré.",
+                "default_role": None,
+                "label": None,
+                "expires_at": None,
+            }
+
+        try:
+            token_data = json.loads(cached_value)
+        except (json.JSONDecodeError, TypeError):
+            return {
+                "is_valid": False,
+                "message": "Token corrompu.",
+                "default_role": None,
+                "label": None,
+                "expires_at": None,
+            }
+
+        return {
+            "is_valid": True,
+            "message": "Lien valide.",
+            "default_role": token_data.get("role", "member"),
+            "label": token_data.get("label"),
+            "expires_at": token_data.get("expires_at"),
+        }
 
     # ─────────────────────────────────────────────────────────────────────────
     # CHANGEMENT DE MOT DE PASSE
@@ -255,21 +319,15 @@ class AuthService:
         member: Member,
         data: ChangePasswordRequest,
     ) -> None:
-        """
-        Change le mot de passe. Exige l'ancien pour confirmer l'identité.
-        Révoque toutes les sessions existantes après le changement.
-        """
         if not verify_password(member.password_hash, data.current_password):
             raise UnauthorizedError("Mot de passe actuel incorrect")
-
         if verify_password(member.password_hash, data.new_password):
             raise BusinessRuleError(
                 "Le nouveau mot de passe doit être différent de l'ancien"
             )
-
         member.password_hash = hash_password(data.new_password)
         await cache_delete(CacheKeys.refresh_token(str(member.id)))
-        await self._log(member.id, AuditAction.UPDATE, "member", member.id, None)
+        await self._log(member.id, AuditAction.UPDATE, "member", member.id)
 
     # ─────────────────────────────────────────────────────────────────────────
     # MÉTHODES PRIVÉES
@@ -287,13 +345,41 @@ class AuthService:
         )
         return result.scalar_one_or_none()
 
+    async def _create_tokens_for(self, member: Member) -> TokenResponse:
+        """
+        Génère access_token + refresh_token pour un membre
+        et stocke le refresh_token dans Redis.
+        Utilisé par login() ET par les méthodes d'inscription
+        (pour éviter d'appeler login() avant commit).
+        """
+        access_token  = create_access_token(
+            subject=str(member.id),
+            extra_claims={"role": member.role, "name": member.full_name},
+        )
+        refresh_token = create_refresh_token(subject=str(member.id))
+
+        ttl = settings.jwt_refresh_token_expire_days * 86_400
+        await cache_set(
+            key=CacheKeys.refresh_token(str(member.id)),
+            value=refresh_token,
+            ttl_seconds=ttl,
+        )
+
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            member_id=str(member.id),
+            full_name=member.full_name,
+            role=member.role,
+        )
+
     async def _log(
         self,
         member_id,
         action: AuditAction,
         entity_type: str,
         entity_id,
-        ip_address: str | None,
+        ip_address: str | None = None,
     ) -> None:
         """Enregistre une action dans les audit_logs."""
         log = AuditLog(

@@ -1,46 +1,53 @@
-"""
-auth/schemas.py — Forme des données pour le domaine authentification.
-
-Deux catégories de schemas :
-  - Request  : ce que le CLIENT envoie à l'API (corps de la requête)
-  - Response : ce que l'API retourne au CLIENT
-
-FastAPI utilise les schemas Request pour :
-  1. Valider automatiquement les données (types, longueurs, formats)
-  2. Générer la documentation Swagger automatiquement
-  3. Retourner une erreur 422 claire si les données sont invalides
-
-@field_validator : s'exécute automatiquement à la création de l'objet.
-Si le validator lève une ValueError, Pydantic retourne une erreur 422
-avec le message de l'erreur — avant même d'appeler le service.
-"""
-
+import re
 from pydantic import BaseModel, field_validator
+
+ALLOWED_COUNTRY_CODES = ("+221", "+224")
+
+
+def _validate_phone(v: str) -> str:
+    cleaned = v.strip().replace(" ", "").replace("-", "")
+
+    if cleaned.startswith("+"):
+        # Numéro complet fourni — vérifie l'indicatif
+        if not any(cleaned.startswith(code) for code in ALLOWED_COUNTRY_CODES):
+            raise ValueError(
+                "Indicatif non autorisé. Utilisez +221 (Sénégal) ou +224 (Guinée)."
+            )
+        digits_after = cleaned[4:]
+        if not digits_after.isdigit():
+            raise ValueError("Le numéro ne doit contenir que des chiffres après l'indicatif.")
+        if len(digits_after) < 7 or len(digits_after) > 10:
+            raise ValueError("Numéro invalide (longueur attendue : 7-10 chiffres après l'indicatif).")
+        return cleaned
+
+    # Chiffres locaux — on accepte, le frontend aura déjà préfixé l'indicatif
+    if not cleaned.isdigit():
+        raise ValueError("Le numéro ne doit contenir que des chiffres.")
+    if len(cleaned) < 7 or len(cleaned) > 10:
+        raise ValueError("Numéro invalide.")
+    return cleaned
+
+
+def _validate_email(v: str | None) -> str | None:
+    if not v:
+        return None
+    v = v.strip().lower()
+    if not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', v):
+        raise ValueError("Format d'email invalide. Exemple : nom@domaine.com")
+    return v
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# REQUESTS (données envoyées par le client)
+# REQUESTS
 # ─────────────────────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
-    """
-    Données attendues pour se connecter.
-
-    'identifier' accepte soit le numéro de téléphone, soit l'email.
-    On normalise en minuscules pour éviter les problèmes de casse
-    ("Mamadou@gmail.com" et "mamadou@gmail.com" doivent fonctionner).
-    """
-    identifier: str   # téléphone (+221XXXXXXXX) ou email
+    identifier: str
     password: str
 
     @field_validator("identifier")
     @classmethod
     def normalize_identifier(cls, v: str) -> str:
-        """
-        @classmethod : reçoit la classe (cls) et la valeur brute (v).
-        strip() supprime les espaces avant/après.
-        lower() met en minuscules.
-        """
         return v.strip().lower()
 
     @field_validator("password")
@@ -52,45 +59,87 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    """Données pour renouveler le token d'accès."""
+    """Renouveler le token d'accès."""
     refresh_token: str
 
 
 class RegisterFromInviteRequest(BaseModel):
     """
-    Données pour créer son compte depuis un lien d'invitation.
-
-    Le token est inclus dans le lien envoyé par l'admin :
-    https://app.association.com/register?token=abc123
-
-    Le frontend extrait le token de l'URL et l'inclut dans cette requête.
+    Inscription depuis un lien d'invitation personnelle.
+    Le token contient le rôle (stocké dans Redis).
+    Le membre renseigne toutes ses informations.
     """
-    token: str          # token d'invitation (extrait de l'URL)
-    full_name: str      # le membre saisit son propre nom
-    password: str       # il choisit son mot de passe
+    token: str
+    full_name: str
+    phone_number: str
+    email: str | None = None
+    password: str
 
     @field_validator("full_name")
     @classmethod
     def validate_full_name(cls, v: str) -> str:
         v = v.strip()
         if len(v) < 2:
-            raise ValueError("Le nom complet doit contenir au moins 2 caractères")
+            raise ValueError("Le nom doit contenir au moins 2 caractères")
         return v
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        return _validate_phone(v)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str | None) -> str | None:
+        return _validate_email(v)
 
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        """
-        Règles minimales de sécurité pour le mot de passe.
-        On peut en ajouter d'autres (majuscule, chiffre...) si besoin.
-        """
+        if len(v) < 8:
+            raise ValueError("Le mot de passe doit contenir au moins 8 caractères")
+        return v
+
+
+class RegisterFromGroupRequest(BaseModel):
+    """
+    Inscription depuis un lien d'invitation groupée.
+    Le lien reste réutilisable après l'inscription.
+    """
+    group_token: str
+    full_name: str
+    phone_number: str
+    email: str | None = None
+    password: str
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Le nom doit contenir au moins 2 caractères")
+        return v
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        return _validate_phone(v)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str | None) -> str | None:
+        return _validate_email(v)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError("Le mot de passe doit contenir au moins 8 caractères")
         return v
 
 
 class ChangePasswordRequest(BaseModel):
-    """Données pour changer son mot de passe depuis le profil."""
+    """Changer son mot de passe depuis le profil."""
     current_password: str
     new_password: str
 
@@ -103,19 +152,13 @@ class ChangePasswordRequest(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RESPONSES (données retournées par l'API)
+# RESPONSES
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TokenResponse(BaseModel):
-    """
-    Retourné après un login ou un register réussi.
-
-    On inclut role et full_name directement dans la réponse pour que
-    le frontend puisse afficher le bon menu/interface sans faire
-    une deuxième requête vers /auth/me.
-    """
-    access_token: str    # courte durée (1h) — utilisé dans chaque requête
-    refresh_token: str   # longue durée (30j) — pour régénérer l'access token
+    """Retourné après login ou register."""
+    access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     member_id: str
     full_name: str
@@ -125,9 +168,7 @@ class TokenResponse(BaseModel):
 class MeResponse(BaseModel):
     """
     Profil du membre connecté — retourné par GET /auth/me.
-
-    On n'expose jamais password_hash ni invitation_token — ce sont
-    des champs internes qui ne doivent pas sortir de l'API.
+    Inclut profile_picture_url pour l'affichage de l'avatar.
     """
     id: str
     full_name: str
@@ -136,3 +177,4 @@ class MeResponse(BaseModel):
     role: str
     status: str
     joined_at: str | None
+    profile_picture_url: str | None = None  # None si pas encore uploadé

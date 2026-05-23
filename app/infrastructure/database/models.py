@@ -1,14 +1,3 @@
-"""
-database/models.py — Définition de toutes les tables de la base de données.
-
-Chaque classe = une table PostgreSQL.
-Chaque attribut Mapped[type] = une colonne.
-Les relationship() définissent comment naviguer entre les tables en Python.
-
-Import important : ce fichier doit être importé dans alembic/env.py
-pour qu'Alembic détecte les tables et génère les migrations.
-"""
-
 import uuid
 from datetime import datetime
 
@@ -33,11 +22,6 @@ from app.infrastructure.database.base import Base, TimestampMixin, UUIDMixin
 # MEMBER — Les membres de l'association
 # ─────────────────────────────────────────────────────────────────────────────
 class Member(Base, UUIDMixin, TimestampMixin):
-    """
-    Table centrale : tout pointe vers Member.
-    Un membre peut être invité (status=pending) avant d'avoir créé son compte.
-    Le champ invitation_token est un lien unique envoyé par l'admin.
-    """
     __tablename__ = "members"
 
     full_name: Mapped[str] = mapped_column(String(150), nullable=False)
@@ -105,10 +89,6 @@ class Member(Base, UUIDMixin, TimestampMixin):
 # ASSOCIATION SETTINGS — Configuration globale (singleton)
 # ─────────────────────────────────────────────────────────────────────────────
 class AssociationSettings(Base, UUIDMixin):
-    """
-    Table singleton : UNE SEULE LIGNE contient la config de l'association.
-    C'est ici qu'on bascule entre mode de cotisation "free" et "fixed".
-    """
     __tablename__ = "association_settings"
 
     contribution_mode: Mapped[str] = mapped_column(
@@ -139,10 +119,6 @@ class AssociationSettings(Base, UUIDMixin):
 # PROJECT
 # ─────────────────────────────────────────────────────────────────────────────
 class Project(Base, UUIDMixin, TimestampMixin):
-    """
-    Représente un projet de l'association (construction, achat, événement...).
-    budget_spent est mis à jour automatiquement lors de chaque dépense liée.
-    """
     __tablename__ = "projects"
 
     title: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -176,11 +152,6 @@ class Project(Base, UUIDMixin, TimestampMixin):
 # TREASURY BALANCE — Solde de la caisse
 # ─────────────────────────────────────────────────────────────────────────────
 class TreasuryBalance(Base, UUIDMixin):
-    """
-    Table singleton : solde actuel de la caisse.
-    Le comptable l'initialise une fois pour synchroniser l'existant.
-    Ensuite, chaque transaction met à jour 'balance'.
-    """
     __tablename__ = "treasury_balance"
 
     balance: Mapped[float] = mapped_column(Numeric(14, 2), default=0, nullable=False)
@@ -215,10 +186,6 @@ class TreasuryBalance(Base, UUIDMixin):
 # TRANSACTION — Chaque mouvement d'argent
 # ─────────────────────────────────────────────────────────────────────────────
 class Transaction(Base, UUIDMixin, TimestampMixin):
-    """
-    Historique immuable de tous les mouvements financiers.
-    Types : deposit (cotisation confirmée) | expense (dépense) | adjustment (init)
-    """
     __tablename__ = "transactions"
 
     type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -419,3 +386,78 @@ class AuditLog(Base, UUIDMixin):
 
     def __repr__(self) -> str:
         return f"<AuditLog {self.action} on {self.entity_type} by {self.member_id}>"
+    
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GROUP INVITATION — Liens d'invitation partageable (multi-usages)
+# ─────────────────────────────────────────────────────────────────────────────
+# À AJOUTER dans app/infrastructure/database/models.py
+# après la classe Member (vers la ligne 85)
+
+class GroupInvitation(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "group_invitations"
+
+    # Token URL-safe unique partagé dans le groupe
+    token: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False, index=True
+    )
+
+    # Qui a créé ce lien (obligatoirement un admin)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("members.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Rôle assigné automatiquement aux inscrits via ce lien
+    # Par défaut "member" — l'admin peut choisir un autre rôle
+    default_role: Mapped[str] = mapped_column(
+        String(20), default="member", nullable=False
+    )
+
+    # Label optionnel pour identifier le lien (ex: "Groupe WhatsApp Mars 2026")
+    label: Mapped[str | None] = mapped_column(String(150), nullable=True)
+
+    # Date d'expiration du lien
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    # Nombre max d'utilisations (None = illimité)
+    max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Compteur d'inscriptions réalisées via ce lien
+    use_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Permet de désactiver manuellement sans supprimer
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Navigation : qui a créé ce lien
+    creator: Mapped["Member"] = relationship(
+        "Member", foreign_keys=[created_by]
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POSTE — Les postes de l'organigramme
+# ─────────────────────────────────────────────────────────────────────────────
+class Poste(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "postes"
+ 
+    # Titre du poste — unique, pas de doublon possible
+    title: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+ 
+    # Membre qui occupe ce poste — UNIQUE = un poste = un seul membre
+    # nullable=True car un poste peut être vacant (pas encore attribué)
+    member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("members.id", ondelete="SET NULL"),
+        unique=True,
+        nullable=True,
+    )
+ 
+    # ── Relationship ───────────────────────────────────────────────────────
+    # Permet d'accéder au membre via poste.member en Python
+    member = relationship("Member", backref="poste", lazy="selectin")
+ 

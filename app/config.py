@@ -36,12 +36,12 @@ class Settings(BaseSettings):
     # Literal["a", "b"] signifie : seules ces valeurs sont acceptées
     environment: Literal["development", "staging", "production", "test"] = "development"
     debug: bool = False
-    frontend_url: str = "http://localhost:5173"
+    frontend_url: str = "http://localhost:4200"
 
     # ── API ───────────────────────────────────────────────────────────────────
     api_prefix: str = "/api/v1"
     # Stocké comme string dans .env, on le convertit en liste dans la property
-    allowed_origins: str = "http://localhost:5173"
+    allowed_origins: str = "http://localhost:4200"
 
     # ── Base de données ───────────────────────────────────────────────────────
     database_url: str

@@ -6,8 +6,12 @@ _hasher = PasswordHasher()
 def hash_password(password: str) -> str:
     return _hasher.hash(password)
 
-def verify_password(hash: str, password: str) -> bool:
+
+def verify_password(stored_hash: str, password: str) -> bool:
     try:
-        return _hasher.verify(hash, password)
-    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return _hasher.verify(stored_hash, password)
+    except VerifyMismatchError:
         return False
+    except (VerificationError, InvalidHashError) as e:
+        raise ValueError(f"Hash invalide : {e}") from e
+

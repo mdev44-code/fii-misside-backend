@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($venv = \"C:\\\\Users\\\\Madina\\\\Desktop\\\\L3 GL 24-25\\\\Mes projets\\\\fii-misside\\\\fii-misside-backend\\\\.venv\"; ls \"$venv\\\\Scripts\" | Select-Object Name | Where-Object {$_.Name -match \"python|pip|poetry\"})",
+      "PowerShell(ls \"C:\\\\Users\\\\Madina\\\\Desktop\\\\L3 GL 24-25\\\\Mes projets\\\\fii-misside\\\\fii-misside-backend\\\\.venv\\\\bin\" | Where-Object {$_.Name -match \"python|pip|poetry\"})",
+      "PowerShell(pip *)",
+      "PowerShell(docker exec *)"
+    ]
+  }
+}

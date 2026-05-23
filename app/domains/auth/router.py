@@ -27,11 +27,16 @@ from app.domains.auth.schemas import (
     LoginRequest,
     MeResponse,
     RefreshRequest,
-    RegisterFromInviteRequest,
+    RegisterFromGroupRequest,
+    RegisterFromInviteRequest
 )
 from app.domains.auth.service import AuthService
 from app.infrastructure.database.session import get_db
 from app.shared.response import success_response
+
+from app.domains.members.service import MemberService
+
+from app.domains.members.schemas import RegisterFromGroupInviteRequest
 
 # APIRouter : un groupe de routes.
 # prefix et tags sont ajoutés dans main.py au moment de l'inclusion.
@@ -40,64 +45,67 @@ router = APIRouter()
 
 @router.post("/login")
 async def login(
-    data: LoginRequest,       # corps JSON validé automatiquement par Pydantic
-    request: Request,          # objet Request FastAPI (pour récupérer l'IP)
+    data: LoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    service = AuthService(db)
+    ip = request.client.host if request.client else None
+    tokens = await service.login(data, ip_address=ip)
+    return success_response(data=tokens.model_dump(), message="Connexion réussie")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /auth/group-invite/{token} — Valider un token de groupe (public)
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@router.get("/group-invite/{token}")
+async def validate_group_invite(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    service = AuthService(db)
+    result = await service.validate_group_token(token)
+    return success_response(data=result) 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /auth/register-group — S'inscrire via lien groupé (public)
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@router.post("/register-group")
+async def register_from_group(
+    data: RegisterFromGroupRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Connecte un membre avec son téléphone/email et son mot de passe.
-
-    Retourne access_token + refresh_token.
-
-    Request est injecté par FastAPI — il contient les infos de la requête HTTP
-    (IP, headers, etc.). On l'utilise uniquement pour logger l'IP dans l'audit.
+    Crée un compte depuis un lien d'invitation groupée.
+    Route publique. Le token reste valide après l'inscription.
     """
     service = AuthService(db)
-    # request.client est None si l'IP n'est pas disponible (tests, proxy)
-    ip = request.client.host if request.client else None
-    tokens = await service.login(data, ip_address=ip)
-
+    tokens = await service.register_from_group(data)
     return success_response(
         data=tokens.model_dump(),
-        message="Connexion réussie",
+        message="Compte créé avec succès. Bienvenue dans l'association !",
     )
-
 
 @router.post("/refresh")
 async def refresh_token(
     data: RefreshRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Renouvelle l'access token à partir d'un refresh token valide.
-    Le frontend appelle cette route automatiquement quand il reçoit
-    une erreur 401 (token expiré).
-    """
     service = AuthService(db)
     tokens = await service.refresh(data.refresh_token)
-
-    return success_response(
-        data=tokens.model_dump(),
-        message="Token renouvelé",
-    )
-
+    return success_response(data=tokens.model_dump(), message="Token renouvelé")
 
 @router.post("/logout")
 async def logout(
     request: Request,
-    current_member=Depends(get_current_member),  # vérifie le token
+    current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Déconnecte le membre en révoquant son refresh token.
-    Nécessite d'être connecté (Depends(get_current_member)).
-    """
     service = AuthService(db)
     ip = request.client.host if request.client else None
     await service.logout(str(current_member.id), ip_address=ip)
-
     return success_response(message="Déconnexion réussie")
-
 
 @router.post("/register")
 async def register_from_invite(
@@ -105,17 +113,15 @@ async def register_from_invite(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Crée un compte depuis un lien d'invitation.
-    Route publique : pas besoin d'être connecté.
+    Crée un compte depuis un lien d'invitation personnelle.
+    Route publique. Le token est à usage unique.
     """
     service = AuthService(db)
     tokens = await service.register_from_invite(data)
-
     return success_response(
         data=tokens.model_dump(),
         message="Compte créé avec succès. Bienvenue !",
     )
-
 
 @router.put("/password")
 async def change_password(
@@ -123,32 +129,14 @@ async def change_password(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Change le mot de passe du membre connecté.
-    Exige l'ancien mot de passe pour confirmer l'identité.
-    """
     service = AuthService(db)
     await service.change_password(current_member, data)
-
-    return success_response(
-        message="Mot de passe modifié. Veuillez vous reconnecter."
-    )
-
+    return success_response(message="Mot de passe modifié. Veuillez vous reconnecter.")
 
 @router.get("/me")
 async def get_me(
     current_member=Depends(get_current_member),
 ):
-    """
-    Retourne le profil du membre connecté.
-
-    Note : pas de db ici car current_member est déjà chargé
-    par la dependency get_current_member. Pas besoin d'une
-    deuxième requête BDD.
-
-    On utilise MeResponse pour contrôler exactement quels champs
-    sont exposés (pas de password_hash, pas d'invitation_token).
-    """
     return success_response(
         data=MeResponse(
             id=str(current_member.id),
@@ -162,5 +150,6 @@ async def get_me(
                 if current_member.joined_at
                 else None
             ),
+            profile_picture_url=current_member.profile_picture_url,
         ).model_dump()
     )

@@ -1,18 +1,3 @@
-"""
-cache/redis.py — Interface avec Redis.
-
-Redis est une base de données clé-valeur ultra-rapide (en mémoire).
-On l'utilise pour :
-  1. Stocker les refresh tokens JWT (avec expiration automatique)
-  2. Stocker les tokens d'invitation (avec expiration 72h)
-  3. Rate limiting (limiter le nombre de tentatives de connexion)
-
-Exemple de données stockées :
-  clé: "refresh_token:abc-123-uuid"   → valeur: "eyJhbGciOiJIUzI1NiJ..."
-  clé: "invitation:xyz-token-123"     → valeur: "member-uuid-456"
-  TTL (time to live) : la clé est supprimée automatiquement après X secondes.
-"""
-
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -109,17 +94,12 @@ class CacheKeys:
 
     @staticmethod
     def invitation_token(token: str) -> str:
-        """
-        Clé pour un token d'invitation.
-        Stocke l'id du membre invité.
-        Exemple : "invitation:abc123xyz"
-        """
         return f"invitation:{token}"
+    
+    @staticmethod
+    def group_invite_token(token: str) -> str:
+        return f"group_invite:{token}"
 
     @staticmethod
     def rate_limit(ip: str, action: str) -> str:
-        """
-        Clé pour le rate limiting par IP et action.
-        Exemple : "rate_limit:login:192.168.1.1"
-        """
         return f"rate_limit:{action}:{ip}"

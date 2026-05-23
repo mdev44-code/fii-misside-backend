@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_member
 from app.domains.members.schemas import (
+    CreateGroupInviteRequest,
     InviteMemberRequest,
     UpdateMemberRoleRequest,
     UpdateMemberStatusRequest,
@@ -29,10 +30,6 @@ async def get_my_profile(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Retourne le profil complet du membre connecté.
-    Inclut : nom, email, téléphone, rôle, statut, photo de profil.
-    """
     service = MemberService(db)
     profile = await service.get_me(current_member)
     return success_response(data=profile.model_dump(), message="Profil chargé")
@@ -48,15 +45,6 @@ async def update_my_profile(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Modifie le profil du membre connecté.
-    Seuls les champs envoyés dans le body sont modifiés (PATCH partiel).
-
-    Champs modifiables :
-      - full_name    : nom complet
-      - email        : adresse email (unicité vérifiée)
-      - phone_number : numéro de téléphone (unicité vérifiée)
-    """
     service = MemberService(db)
     updated = await service.update_profile(current_member, data)
     await db.commit()
@@ -76,18 +64,6 @@ async def upload_my_avatar(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Upload une photo de profil vers AWS S3.
-
-    Formats acceptés : JPG, JPEG, PNG, WebP
-    Taille maximum   : 5 Mo
-
-    La photo est stockée dans S3 sous la clé :
-      profiles/{member_id}/{uuid}.{ext}
-
-    L'ancienne photo est automatiquement supprimée de S3 si elle existe.
-    Retourne le profil mis à jour avec la nouvelle URL de la photo.
-    """
     file_content = await file.read()
 
     if len(file_content) > MAX_UPLOAD_SIZE:
@@ -123,10 +99,6 @@ async def get_org_chart(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Retourne l'organigramme groupé par rôle.
-    Accessible à tous les membres connectés.
-    """
     service = MemberService(db)
     chart = await service.get_org_chart()
 
@@ -183,6 +155,82 @@ async def invite_member(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# POST /members/group-invite — Créer un lien d'invitation groupé
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@router.post("/group-invite", dependencies=[Depends(require_admin)])
+async def create_group_invite(
+    data: CreateGroupInviteRequest,
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MemberService(db)
+    result = await service.create_group_invite(data, created_by=current_member)
+    await db.commit()
+
+    return success_response(
+        data=result.model_dump(),
+        message=f"Lien d'invitation groupé créé. Partagez-le dans votre groupe.",
+    )
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /members/group-invite — Lister les liens actifs
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@router.get("/group-invite", dependencies=[Depends(require_admin)])
+async def list_group_invites(
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+    active_only: bool = Query(default=True),
+):
+    service = MemberService(db)
+    invites = await service.list_group_invites(
+        created_by=current_member,
+        active_only=active_only,
+    )
+
+    return success_response(
+        data=[inv.model_dump() for inv in invites],
+        message=f"{len(invites)} lien(s) d'invitation trouvé(s)",
+    )
+ 
+ 
+# ─────────────────────────────────────────────────────────────────────────────
+# DELETE /members/group-invite/{invite_id} — Désactiver un lien
+# ─────────────────────────────────────────────────────────────────────────────
+ 
+@router.delete("/group-invite/{invite_id}", dependencies=[Depends(require_admin)])
+async def deactivate_group_invite(
+    invite_id: str,
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MemberService(db)
+    result = await service.deactivate_group_invite(invite_id, requested_by=current_member)
+    await db.commit()
+
+    return success_response(
+        data=result.model_dump(),
+        message="Lien d'invitation désactivé avec succès.",
+    )
+
+@router.delete("/group-invite/{invite_id}/delete", dependencies=[Depends(require_admin)])
+async def delete_group_invite(
+    invite_id: str,
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MemberService(db)
+    await service.delete_group_invite(invite_id, requested_by=current_member)
+    await db.commit()
+ 
+    return success_response(
+        message="Lien d'invitation supprimé définitivement.",
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Routes dynamiques /{member_id} — TOUJOURS EN DERNIER
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -192,10 +240,6 @@ async def get_member(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Retourne les détails d'un membre par son ID.
-    Accessible à tous les membres connectés.
-    """
     service = MemberService(db)
     member = await service.get_member_by_id(member_id)
 
@@ -209,14 +253,6 @@ async def update_member_role(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Change le rôle d'un membre.
-    Réservé aux administrateurs.
-
-    Règles métier appliquées dans le service :
-      - Impossible de changer son propre rôle
-      - Impossible de retirer le rôle du seul admin
-    """
     service = MemberService(db)
     member = await service.update_role(
         member_id=member_id,
@@ -237,10 +273,6 @@ async def update_member_status(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Change le statut d'un membre (active/inactive/suspended).
-    Réservé aux administrateurs.
-    """
     service = MemberService(db)
     member = await service.update_status(
         member_id=member_id,
@@ -252,3 +284,22 @@ async def update_member_status(
         data=member.model_dump(),
         message=f"Statut mis à jour : {member.status}",
     )
+
+@router.delete("/{member_id}", dependencies=[Depends(require_admin)])
+async def delete_member(
+    member_id: str,
+    current_member=Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MemberService(db)
+    await service.delete_member(
+        member_id=member_id,
+        deleted_by=current_member,
+    )
+    await db.commit()
+ 
+    return success_response(
+        data=None,
+        message="Membre supprimé avec succès",
+    )
+ 
