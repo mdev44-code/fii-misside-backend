@@ -461,3 +461,69 @@ class Poste(Base, UUIDMixin, TimestampMixin):
     # Permet d'accéder au membre via poste.member en Python
     member = relationship("Member", backref="poste", lazy="selectin")
  
+
+class BroadcastNotification(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "broadcast_notifications"
+ 
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+ 
+    # Qui a déclenché cette notification (NULL = automatique/scheduler)
+    triggered_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("members.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+ 
+    # Relations
+    triggered_by_member: Mapped["Member | None"] = relationship(
+        "Member",
+        foreign_keys=[triggered_by],
+    )
+    reads: Mapped[list["BroadcastRead"]] = relationship(
+        back_populates="notification",
+        cascade="all, delete-orphan",
+    )
+ 
+    def __repr__(self) -> str:
+        return f"<BroadcastNotification type={self.type} at={self.created_at}>"
+ 
+ 
+class BroadcastRead(Base):
+    __tablename__ = "broadcast_reads"
+ 
+    # Clé primaire composite
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("broadcast_notifications.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+    member_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("members.id", ondelete="CASCADE"),
+        primary_key=True,
+        nullable=False,
+    )
+    read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+ 
+    # Relations
+    notification: Mapped["BroadcastNotification"] = relationship(
+        back_populates="reads",
+    )
+    member: Mapped["Member"] = relationship("Member")
+ 
+    __table_args__ = (
+        UniqueConstraint("notification_id", "member_id", name="uq_broadcast_read"),
+    )
+ 
+    def __repr__(self) -> str:
+        return (
+            f"<BroadcastRead notif={self.notification_id} "
+            f"member={self.member_id} at={self.read_at}>"
+        )
+ 

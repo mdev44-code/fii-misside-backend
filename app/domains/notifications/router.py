@@ -1,15 +1,18 @@
 """
-notifications/router.py — Endpoints HTTP pour les notifications in-app.
+notifications/router.py — Endpoints HTTP pour les notifications broadcast.
+
+Toutes les notifications sont communes (broadcast).
+La lecture est individuelle : is_read est calculé par membre.
 
 Routes :
-  GET    /notifications          → liste des notifs du membre connecté
-  GET    /notifications?unread=true → seulement les non lues
-  PATCH  /notifications/{id}/read   → marquer une notif comme lue
-  PATCH  /notifications/read-all    → marquer toutes comme lues
-  GET    /notifications/count       → nombre de notifs non lues (pour le badge)
+  GET    /notifications                  → liste des broadcasts (avec is_read)
+  GET    /notifications?unread_only=true → seulement les non lues
+  GET    /notifications/count            → nombre de non-lues (badge 🔔)
+  PATCH  /notifications/{id}/read        → marquer une notif comme lue
+  PATCH  /notifications/read-all         → marquer toutes comme lues
 
-Ces routes concernent uniquement les notifications IN-APP.
-Les SMS n'ont pas de route de lecture — ils partent et c'est tout.
+Note : les routes PATCH modifient uniquement broadcast_reads pour
+le membre connecté — les autres membres ne sont pas affectés.
 """
 
 from fastapi import APIRouter, Depends, Query
@@ -24,37 +27,31 @@ router = APIRouter()
 
 
 @router.get("")
-async def get_my_notifications(
+async def get_notifications(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
     unread_only: bool = Query(default=False),
 ):
     """
-    Retourne les notifications in-app du membre connecté.
-    Triées par date décroissante, limitées aux 50 dernières.
+    Retourne les notifications broadcast du membre connecté.
 
-    ?unread_only=true → seulement les non lues
+    Chaque notification inclut is_read calculé pour CE membre :
+      - is_read: true  → ce membre a déjà lu cette notification
+      - is_read: false → ce membre ne l'a pas encore lue
+
+    Triées par date décroissante (plus récent en premier).
+    Limitées aux 50 dernières.
+
+    ?unread_only=true → seulement les non lues pour ce membre
     """
     service = NotificationService(db)
-    notifications = await service.get_member_notifications(
+    notifications = await service.get_broadcasts(
         member_id=str(current_member.id),
         unread_only=unread_only,
     )
 
     return success_response(
-        data=[
-            {
-                "id": str(n.id),
-                "type": n.type,
-                "content": n.content,
-                "status": n.status,
-                "sent_at": n.sent_at.isoformat() if n.sent_at else None,
-                "read_at": n.read_at.isoformat() if n.read_at else None,
-                "is_read": n.read_at is not None,
-                "created_at": n.created_at.isoformat(),
-            }
-            for n in notifications
-        ],
+        data=notifications,
         message=f"{len(notifications)} notification(s)",
     )
 
@@ -65,19 +62,15 @@ async def get_unread_count(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne le nombre de notifications non lues.
+    Retourne le nombre de notifications non lues pour CE membre.
+
     Utilisé par le frontend pour afficher le badge (ex: 🔔 3).
     Route légère — ne charge que le count, pas les données complètes.
     """
     service = NotificationService(db)
-    notifications = await service.get_member_notifications(
-        member_id=str(current_member.id),
-        unread_only=True,
-    )
+    count = await service.get_unread_count(str(current_member.id))
 
-    return success_response(
-        data={"unread_count": len(notifications)}
-    )
+    return success_response(data={"unread_count": count})
 
 
 @router.patch("/read-all")
@@ -86,11 +79,14 @@ async def mark_all_as_read(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Marque toutes les notifications non lues du membre comme lues.
+    Marque toutes les notifications non lues comme lues pour CE membre.
+
+    N'affecte PAS les autres membres — chacun a son propre suivi de lecture.
     Appelé quand le membre ouvre le panneau de notifications.
     """
     service = NotificationService(db)
-    count = await service.mark_all_as_read(str(current_member.id))
+    count = await service.mark_all_broadcasts_read(str(current_member.id))
+    await db.commit()
 
     return success_response(
         message=f"{count} notification(s) marquée(s) comme lue(s)"
@@ -104,16 +100,17 @@ async def mark_as_read(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Marque une notification spécifique comme lue.
+    Marque une notification spécifique comme lue pour CE membre.
 
-    On vérifie que la notification appartient bien au membre connecté
-    — un membre ne peut pas marquer la notif d'un autre.
+    Les autres membres conservent leur statut de lecture indépendant.
+    Si déjà lue, retourne succès sans erreur (idempotent).
     """
     service = NotificationService(db)
-    found = await service.mark_as_read(
+    found = await service.mark_broadcast_as_read(
         notification_id=notification_id,
         member_id=str(current_member.id),
     )
+    await db.commit()
 
     if not found:
         return success_response(message="Notification introuvable")

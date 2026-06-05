@@ -59,11 +59,6 @@ class Settings(BaseSettings):
     # ── Invitations ───────────────────────────────────────────────────────────
     invitation_token_expire_hours: int = 72
 
-    # ── SMS ───────────────────────────────────────────────────────────────────
-    africastalking_username: str = "sandbox"
-    africastalking_api_key: str = ""
-    africastalking_sender_id: str = "ASSO"
-
     # ── Cotisations ───────────────────────────────────────────────────────────
     contribution_mode: Literal["free", "fixed"] = "free"
     contribution_fixed_amount: int = 5000
@@ -77,9 +72,6 @@ class Settings(BaseSettings):
     aws_s3_bucket_name: str = Field(default="", env="AWS_S3_BUCKET_NAME")
     aws_s3_region: str = Field(default="eu-west-3", env="AWS_S3_REGION")
     aws_s3_endpoint_url: str | None = Field(default=None, env="AWS_S3_ENDPOINT_URL")
-
-    # ── Wave ──────────────────────────────────────────────────────────────────
-    wave_treasurer_number: str = ""
 
     # ── Admin initial ─────────────────────────────────────────────────────────
     first_admin_phone: str = ""

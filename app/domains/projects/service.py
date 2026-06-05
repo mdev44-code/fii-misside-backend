@@ -1,21 +1,3 @@
-"""
-projects/service.py — Logique métier pour la gestion des projets.
-
-Responsabilités :
-  1. Créer un projet (avec ou sans budget)
-  2. Lister tous les projets (avec filtre optionnel par statut)
-  3. Récupérer un projet par son ID
-  4. Modifier un projet (titre, description, budget, statut, dates)
-  5. Supprimer un projet
-
-Règles métier appliquées ici :
-  - Passer en "in_progress" sans budget défini → BusinessRuleError
-  - Supprimer un projet qui a des transactions liées → BusinessRuleError
-    (on ne peut pas supprimer l'historique financier)
-  - budget_spent ne peut pas être modifié manuellement
-    (il est géré automatiquement par treasury/service.py)
-"""
-
 import uuid
 
 from sqlalchemy import func, select
@@ -27,8 +9,19 @@ from app.domains.projects.schemas import (
     UpdateProjectRequest,
 )
 from app.infrastructure.database.models import AuditLog, Member, Project, Transaction
-from app.shared.enums import AuditAction, ProjectStatus
+from app.shared.enums import AuditAction, ProjectStatus, PROJECT_STATUS_TRANSITIONS
 from app.shared.exceptions import BusinessRuleError, NotFoundError
+
+
+# Labels lisibles pour les messages d'erreur
+_STATUS_LABELS: dict[ProjectStatus, str] = {
+    ProjectStatus.DRAFT: "Brouillon",
+    ProjectStatus.IN_PROGRESS: "En cours",
+    ProjectStatus.COMPLETED: "Terminé",
+    ProjectStatus.SUSPENDED: "Suspendu",
+    ProjectStatus.ABANDONED: "Abandonné",
+    ProjectStatus.CANCELLED: "Annulé",
+}
 
 
 class ProjectService:
@@ -45,13 +38,6 @@ class ProjectService:
         data: CreateProjectRequest,
         created_by: Member,
     ) -> ProjectResponse:
-        """
-        Crée un nouveau projet.
-
-        Le statut initial est toujours "draft" — on ne peut pas créer
-        un projet directement en "in_progress" sans passer par une modification.
-        Le créateur est enregistré pour l'audit et l'affichage.
-        """
         project = Project(
             title=data.title,
             description=data.description,
@@ -86,14 +72,6 @@ class ProjectService:
         self,
         status: ProjectStatus | None = None,
     ) -> list[ProjectResponse]:
-        """
-        Retourne tous les projets, triés par date de création décroissante.
-        Filtre optionnel par statut : ?status=in_progress
-
-        On charge le nom du créateur en une requête supplémentaire par projet.
-        Pour ce volume (petite association), c'est acceptable.
-        Si le volume grandit, on pourrait faire une jointure SQL.
-        """
         stmt = select(Project)
 
         if status:
@@ -114,10 +92,6 @@ class ProjectService:
         return responses
 
     async def get_project_by_id(self, project_id: str) -> ProjectResponse:
-        """
-        Retourne un projet par son UUID.
-        Lève NotFoundError si inexistant.
-        """
         project = await self._get_project_or_404(project_id)
         creator_name = await self._get_member_name(project.created_by)
         return ProjectResponse.from_model(project, creator_name=creator_name)
@@ -132,16 +106,6 @@ class ProjectService:
         data: UpdateProjectRequest,
         updated_by: Member,
     ) -> ProjectResponse:
-        """
-        Modifie un projet de façon partielle (PATCH).
-
-        Seuls les champs fournis dans le body sont modifiés.
-        model_dump(exclude_none=True) retourne uniquement les champs
-        qui ont été explicitement envoyés — pas les None par défaut.
-
-        Règle métier : passer en "in_progress" sans budget défini → erreur.
-        Le message explique clairement ce qu'il faut faire.
-        """
         project = await self._get_project_or_404(project_id)
 
         # Capture les anciennes valeurs pour l'audit
@@ -154,8 +118,14 @@ class ProjectService:
             ),
         }
 
+        current_status = ProjectStatus(project.status)
+
+        # ── Validation de la transition de statut ──
+        if data.status and data.status != current_status:
+            self._validate_status_transition(current_status, data.status)
+
         # Vérifie la règle métier AVANT de modifier quoi que ce soit
-        new_status = data.status or project.status
+        new_status = data.status or current_status
         new_budget = data.budget_allocated if data.budget_allocated is not None else project.budget_allocated
 
         if new_status == ProjectStatus.IN_PROGRESS and new_budget is None:
@@ -191,16 +161,6 @@ class ProjectService:
         project_id: str,
         deleted_by: Member,
     ) -> None:
-        """
-        Supprime un projet.
-
-        Règle métier : on refuse la suppression si des transactions
-        sont liées à ce projet. Supprimer un projet avec des dépenses
-        enregistrées rendrait l'historique financier incohérent.
-
-        Dans ce cas, on suggère de passer le projet en "cancelled"
-        plutôt que de le supprimer.
-        """
         project = await self._get_project_or_404(project_id)
 
         # Vérifie s'il y a des transactions liées
@@ -214,7 +174,7 @@ class ProjectService:
         if tx_count > 0:
             raise BusinessRuleError(
                 f"Impossible de supprimer ce projet : {tx_count} transaction(s) "
-                f"y sont liées. Passez-le en statut 'cancelled' à la place."
+                f"y sont liées. Passez-le en statut 'cancelled' ou 'abandoned' à la place."
             )
 
         self._db.add(AuditLog(
@@ -231,11 +191,32 @@ class ProjectService:
     # HELPERS PRIVÉS
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _validate_status_transition(
+        self,
+        current: ProjectStatus,
+        target: ProjectStatus,
+    ) -> None:
+        allowed = PROJECT_STATUS_TRANSITIONS.get(current, [])
+
+        if target not in allowed:
+            current_label = _STATUS_LABELS.get(current, current.value)
+            target_label = _STATUS_LABELS.get(target, target.value)
+
+            if not allowed:
+                raise BusinessRuleError(
+                    f"Le projet est en statut '{current_label}' qui est un statut terminal. "
+                    f"Aucune modification de statut n'est possible."
+                )
+
+            allowed_labels = ", ".join(
+                f"'{_STATUS_LABELS.get(s, s.value)}'" for s in allowed
+            )
+            raise BusinessRuleError(
+                f"Transition de statut invalide : '{current_label}' → '{target_label}'. "
+                f"Depuis '{current_label}', les transitions possibles sont : {allowed_labels}."
+            )
+
     async def _get_project_or_404(self, project_id: str) -> Project:
-        """
-        Charge un projet par son UUID ou lève NotFoundError.
-        Réutilisé dans get, update et delete.
-        """
         try:
             project_uuid = uuid.UUID(project_id)
         except ValueError as exc:
@@ -252,10 +233,6 @@ class ProjectService:
         return project
 
     async def _get_member_name(self, member_id: uuid.UUID) -> str:
-        """
-        Retourne le nom complet d'un membre par son UUID.
-        Retourne une chaîne vide si le membre est introuvable.
-        """
         result = await self._db.execute(
             select(Member.full_name).where(Member.id == member_id)
         )

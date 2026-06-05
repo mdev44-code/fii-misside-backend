@@ -361,20 +361,6 @@ class MemberService:
         data: CreateGroupInviteRequest,
         created_by: Member,
     ) -> GroupInviteResponse:
-        """
-        Crée un nouveau lien d'invitation groupé.
- 
-        Étapes :
-          1. Vérifie que le rôle demandé est valide
-          2. Génère un token sécurisé unique
-          3. Calcule la date d'expiration
-          4. Persiste en BDD
- 
-        Le token est stocké en BDD (pas Redis) car :
-          - Les liens de groupe ont une durée de vie plus longue
-          - On veut pouvoir les lister, désactiver, voir le nb d'usages
-          - Redis est volatile (restart = perte des tokens)
-        """
         # 1. Valider le rôle
         valid_roles = {r.value for r in Role}
         if data.default_role not in valid_roles:
@@ -418,12 +404,6 @@ class MemberService:
         created_by: Member,
         active_only: bool = True,
     ) -> list[GroupInviteResponse]:
-        """
-        Retourne les liens d'invitation groupés créés par cet admin.
- 
-        active_only=True : uniquement les liens actifs et non expirés
-        active_only=False : tous les liens (historique complet)
-        """
         query = select(GroupInvitation).where(
             GroupInvitation.created_by == created_by.id
         )

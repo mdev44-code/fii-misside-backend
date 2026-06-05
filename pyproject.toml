@@ -50,7 +50,6 @@ redis = { extras = ["asyncio"], version = "^7.4.0" }
 apscheduler = ">=3.11.2,<4.0.0"
 
 # ── Notifications SMS ─────────────────────────────────────────────────────────
-africastalking = "^2.0.2"
 
 # HTTP client (utilisé en prod pour le healthcheck)
 httpx = "^0.28.1"

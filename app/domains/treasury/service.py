@@ -1,24 +1,3 @@
-"""
-treasury/service.py — Logique métier de la caisse.
-
-PRINCIPE FONDAMENTAL :
-  Toutes les opérations sur la caisse se font dans la même session SQLAlchemy.
-  Si une étape échoue, tout est annulé automatiquement (rollback dans session.py).
-  La caisse ne peut jamais se retrouver dans un état incohérent.
-
-  Ex pour un dépôt : si la notification SMS plante après avoir mis à jour
-  la balance → rollback → la balance revient à son état précédent.
-  Mieux vaut une notification ratée qu'une caisse fausse.
-
-ORDRE DANS confirm_deposit() :
-  1. Charger la caisse (lock pour éviter les conflits concurrents)
-  2. Calculer le nouveau solde
-  3. Créer la transaction (INSERT)
-  4. Mettre à jour la balance (UPDATE)
-  5. Confirmer la contribution (UPDATE)
-  6. Envoyer la notification (hors transaction critique)
-"""
-
 import uuid
 from datetime import datetime, timezone
 
@@ -43,6 +22,7 @@ from app.infrastructure.database.models import (
 from app.shared.enums import (
     AuditAction,
     ContributionStatus,
+    ProjectStatus,
     TransactionStatus,
     TransactionType,
 )
@@ -51,6 +31,24 @@ from app.shared.exceptions import (
     InsufficientFundsError,
     NotFoundError,
 )
+from app.domains.notifications.service import NotificationService
+
+# Statuts qui interdisent toute nouvelle dépense sur un projet
+_TERMINAL_PROJECT_STATUSES = {
+    ProjectStatus.COMPLETED,
+    ProjectStatus.ABANDONED,
+    ProjectStatus.CANCELLED,
+}
+
+# Labels lisibles pour les messages d'erreur
+_STATUS_LABELS: dict[ProjectStatus, str] = {
+    ProjectStatus.DRAFT: "Brouillon",
+    ProjectStatus.IN_PROGRESS: "En cours",
+    ProjectStatus.COMPLETED: "Terminé",
+    ProjectStatus.SUSPENDED: "Suspendu",
+    ProjectStatus.ABANDONED: "Abandonné",
+    ProjectStatus.CANCELLED: "Annulé",
+}
 
 
 class TreasuryService:
@@ -63,12 +61,6 @@ class TreasuryService:
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _get_or_create_balance(self) -> TreasuryBalance:
-        """
-        Récupère la ligne unique de la caisse.
-        Si elle n'existe pas encore (première utilisation), la crée avec 0.
-
-        scalar_one_or_none() : retourne l'objet ou None — jamais d'exception.
-        """
         result = await self._db.execute(select(TreasuryBalance))
         balance = result.scalar_one_or_none()
 
@@ -88,13 +80,6 @@ class TreasuryService:
         initial_balance: float,
         treasurer: Member,
     ) -> BalanceResponse:
-        """
-        Synchronise la caisse avec le solde réel existant.
-        Peut être appelé plusieurs fois (le comptable peut corriger).
-
-        Crée aussi une transaction de type ADJUSTMENT pour garder
-        une trace de cette initialisation dans l'historique.
-        """
         balance = await self._get_or_create_balance()
 
         old_balance = float(balance.balance)
@@ -144,18 +129,6 @@ class TreasuryService:
         data: ConfirmDepositRequest,
         treasurer: Member,
     ) -> TransactionResponse:
-        """
-        Confirme la réception d'un transfert Wave et met à jour la caisse.
-
-        Étapes (toutes dans la même session → atomique) :
-          1. Vérifie que le membre existe
-          2. Récupère le solde actuel
-          3. Calcule le nouveau solde
-          4. Crée la transaction en BDD
-          5. Met à jour le solde de la caisse
-          6. Confirme la contribution du mois
-          7. Envoie une notification SMS au membre
-        """
         # 1. Vérifie que le membre cotisant existe
         member_result = await self._db.execute(
             select(Member).where(Member.id == uuid.UUID(data.member_id))
@@ -163,12 +136,12 @@ class TreasuryService:
         member = member_result.scalar_one_or_none()
         if not member:
             raise NotFoundError("Membre", data.member_id)
-
+ 
         # 2. Récupère la caisse
         balance = await self._get_or_create_balance()
         current_balance = float(balance.balance)
         new_balance = current_balance + data.amount
-
+ 
         # 3. Crée la transaction
         tx = Transaction(
             type=TransactionType.DEPOSIT,
@@ -183,13 +156,12 @@ class TreasuryService:
             performed_at=datetime.now(timezone.utc),
         )
         self._db.add(tx)
-
+ 
         # 4. Met à jour le solde
         balance.balance = new_balance
-
-        # flush() pour obtenir tx.id avant de l'utiliser dans la contribution
+ 
         await self._db.flush()
-
+ 
         # 5. Confirme la contribution du mois en cours
         await self._confirm_contribution(
             member_id=data.member_id,
@@ -197,10 +169,14 @@ class TreasuryService:
             amount=data.amount,
             contribution_id=data.contribution_id,
         )
-
-        # 6. Notification SMS (après le flush — si elle plante, on peut retry)
-        await self._notify_deposit_confirmed(member, data.amount)
-
+        
+        notification_service = NotificationService(self._db)
+        await notification_service.send_contribution_received_broadcast(
+            member_name=member.full_name,
+            amount=data.amount,
+            triggered_by_id=str(treasurer.id),
+        )
+ 
         # 7. Audit log
         self._db.add(AuditLog(
             member_id=treasurer.id,
@@ -213,13 +189,12 @@ class TreasuryService:
                 "balance_after": new_balance,
             },
         ))
-
+ 
         return TransactionResponse.from_model(
             tx,
             member_name=member.full_name,
             performed_by_name=treasurer.full_name,
         )
-
     # ─────────────────────────────────────────────────────────────────────────
     # DÉPENSE
     # ─────────────────────────────────────────────────────────────────────────
@@ -229,81 +204,66 @@ class TreasuryService:
         data: ExpenseRequest,
         treasurer: Member,
     ) -> TransactionResponse:
-        """
-        Enregistre une dépense après retrait Wave physique.
-
-        L'argent a déjà été retiré physiquement par le comptable.
-        On enregistre ici pour tenir la comptabilité à jour.
-
-        Si un project_id est fourni, on met à jour le budget_spent du projet.
-        """
         balance = await self._get_or_create_balance()
         current_balance = float(balance.balance)
-
-        # Vérifie qu'il y a assez de fonds
-        # (cohérence comptable — le retrait est déjà fait physiquement
-        # mais on refuse d'enregistrer si ça crée un solde négatif)
+ 
         if data.amount > current_balance:
-            raise InsufficientFundsError(
-                available=current_balance,
-                requested=data.amount,
+            raise BusinessRuleError(
+                f"Solde insuffisant. Solde actuel : {current_balance:,.0f} FCFA, "
+                f"dépense demandée : {data.amount:,.0f} FCFA."
             )
-
+ 
         new_balance = current_balance - data.amount
-
-        # Vérifie le projet si fourni
-        project = None
+ 
+        tx = Transaction(
+            type=TransactionType.EXPENSE,
+            amount=data.amount,
+            balance_after=new_balance,
+            performed_by=treasurer.id,
+            status=TransactionStatus.CONFIRMED,
+            description=data.description,
+            project_id=uuid.UUID(data.project_id) if data.project_id else None,
+            performed_at=datetime.now(timezone.utc),
+        )
+        self._db.add(tx)
+ 
+        balance.balance = new_balance
+ 
+        await self._db.flush()
+ 
+        # Met à jour le budget_spent du projet si lié
         if data.project_id:
             project_result = await self._db.execute(
                 select(Project).where(Project.id == uuid.UUID(data.project_id))
             )
             project = project_result.scalar_one_or_none()
-            if not project:
-                raise NotFoundError("Projet", data.project_id)
-
-        # Crée la transaction
-        tx = Transaction(
-            type=TransactionType.EXPENSE,
-            amount=data.amount,
-            balance_after=new_balance,
-            project_id=uuid.UUID(data.project_id) if data.project_id else None,
-            performed_by=treasurer.id,
-            status=TransactionStatus.CONFIRMED,
+            if project:
+                project.budget_spent = float(project.budget_spent or 0) + data.amount
+ 
+        notification_service = NotificationService(self._db)
+        await notification_service.send_expense_broadcast(
             description=data.description,
-            performed_at=datetime.now(timezone.utc),
+            amount=data.amount,
+            triggered_by_id=str(treasurer.id),
         )
-        self._db.add(tx)
-
-        # Met à jour le solde de la caisse
-        balance.balance = new_balance
-
-        # Met à jour le budget dépensé du projet si applicable
-        if project:
-            project.budget_spent = float(project.budget_spent) + data.amount
-
-        # Audit log
+ 
         self._db.add(AuditLog(
             member_id=treasurer.id,
             action=AuditAction.CREATE,
             entity_type="transaction",
-            entity_id=None,
+            entity_id=tx.id,
             new_values={
-                "type": "expense",
                 "amount": data.amount,
                 "description": data.description,
                 "balance_after": new_balance,
                 "project_id": data.project_id,
             },
         ))
-
-        await self._db.flush()
-
+ 
         return TransactionResponse.from_model(
             tx,
-            project_title=project.title if project else None,
             performed_by_name=treasurer.full_name,
         )
-
     # ─────────────────────────────────────────────────────────────────────────
     # LECTURE
     # ─────────────────────────────────────────────────────────────────────────
@@ -338,12 +298,6 @@ class TreasuryService:
         offset: int = 0,
         transaction_type: str | None = None,
     ) -> tuple[list[TransactionResponse], int]:
-        """
-        Retourne l'historique des transactions avec pagination.
-
-        tuple[list, int] : on retourne à la fois les transactions ET le total
-        pour que le router puisse construire la réponse paginée.
-        """
         from sqlalchemy import func
 
         # Requête principale
@@ -404,6 +358,49 @@ class TreasuryService:
     # HELPERS PRIVÉS
     # ─────────────────────────────────────────────────────────────────────────
 
+    async def _validate_and_activate_project(
+        self,
+        project: Project,
+        treasurer: Member,
+    ) -> None:
+        current_status = ProjectStatus(project.status)
+
+        # Statuts terminaux : impossible de dépenser
+        if current_status in _TERMINAL_PROJECT_STATUSES:
+            status_label = _STATUS_LABELS.get(current_status, current_status.value)
+            raise BusinessRuleError(
+                f"Impossible d'enregistrer une dépense pour le projet '{project.title}' : "
+                f"il est en statut '{status_label}'. "
+                f"Un projet terminé, abandonné ou annulé ne peut plus recevoir de dépenses."
+            )
+
+        # Passage automatique de draft ou suspended → in_progress
+        if current_status in (ProjectStatus.DRAFT, ProjectStatus.SUSPENDED):
+            # Vérification : un projet draft sans budget ne peut pas démarrer
+            if current_status == ProjectStatus.DRAFT and project.budget_allocated is None:
+                raise BusinessRuleError(
+                    f"Impossible d'enregistrer une dépense pour le projet '{project.title}' : "
+                    f"il est en brouillon et n'a pas de budget défini. "
+                    f"Ajoutez un budget au projet avant d'enregistrer des dépenses."
+                )
+
+            old_status = project.status
+            project.status = ProjectStatus.IN_PROGRESS
+
+            # Audit log pour tracer le changement automatique de statut
+            self._db.add(AuditLog(
+                member_id=treasurer.id,
+                action=AuditAction.UPDATE,
+                entity_type="project",
+                entity_id=project.id,
+                old_values={"status": old_status},
+                new_values={
+                    "status": ProjectStatus.IN_PROGRESS,
+                    "auto_transition": True,
+                    "reason": "Dépense enregistrée — passage automatique en cours",
+                },
+            ))
+
     async def _confirm_contribution(
         self,
         member_id: str,
@@ -411,17 +408,6 @@ class TreasuryService:
         amount: float,
         contribution_id: str | None,
     ) -> None:
-        """
-        Confirme la cotisation du mois en cours pour ce membre.
-
-        Trois cas possibles :
-          1. contribution_id fourni → met à jour cette contribution spécifique
-          2. Contribution DECLARED trouvée ce mois → la confirme
-          3. Aucune contribution trouvée → en crée une nouvelle (confirmée directement)
-
-        On lit aussi les settings de l'association pour renseigner
-        expected_amount et contribution_mode (snapshot).
-        """
         from app.infrastructure.database.models import AssociationSettings
 
         now = datetime.now(timezone.utc)
@@ -487,20 +473,4 @@ class TreasuryService:
             )
             self._db.add(new_contribution)
 
-    async def _notify_deposit_confirmed(
-        self,
-        member: Member,
-        amount: float,
-    ) -> None:
-        """
-        Envoie une notification SMS au membre pour confirmer sa cotisation.
-        Si la notification échoue, on ne lève pas d'exception —
-        la transaction financière est plus importante que la notif.
-        """
-        try:
-            from app.domains.notifications.service import NotificationService
-            notif_service = NotificationService(self._db)
-            await notif_service.send_contribution_confirmed(member, amount)
-        except Exception as e:
-            # Log l'erreur mais ne bloque pas la transaction financière
-            print(f"⚠️ Notification échouée pour {member.full_name}: {e}")
+    
