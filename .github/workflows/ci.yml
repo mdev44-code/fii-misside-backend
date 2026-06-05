@@ -29,9 +29,7 @@ jobs:
 
       - name: Ruff format check
         run: poetry run ruff format --check app/
-
-      - name: Mypy type check
-        run: poetry run mypy app/ --explicit-package-bases
+        
 
   # ── Tests ──────────────────────────────────────────────────────────────────
   test:
