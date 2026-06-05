@@ -88,9 +88,7 @@ async def mark_all_as_read(
     count = await service.mark_all_broadcasts_read(str(current_member.id))
     await db.commit()
 
-    return success_response(
-        message=f"{count} notification(s) marquée(s) comme lue(s)"
-    )
+    return success_response(message=f"{count} notification(s) marquée(s) comme lue(s)")
 
 
 @router.patch("/{notification_id}/read")

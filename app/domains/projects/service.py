@@ -9,9 +9,8 @@ from app.domains.projects.schemas import (
     UpdateProjectRequest,
 )
 from app.infrastructure.database.models import AuditLog, Member, Project, Transaction
-from app.shared.enums import AuditAction, ProjectStatus, PROJECT_STATUS_TRANSITIONS
+from app.shared.enums import PROJECT_STATUS_TRANSITIONS, AuditAction, ProjectStatus
 from app.shared.exceptions import BusinessRuleError, NotFoundError
-
 
 # Labels lisibles pour les messages d'erreur
 _STATUS_LABELS: dict[ProjectStatus, str] = {
@@ -25,7 +24,6 @@ _STATUS_LABELS: dict[ProjectStatus, str] = {
 
 
 class ProjectService:
-
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
@@ -51,16 +49,18 @@ class ProjectService:
         self._db.add(project)
         await self._db.flush()  # génère l'UUID sans committer
 
-        self._db.add(AuditLog(
-            member_id=created_by.id,
-            action=AuditAction.CREATE,
-            entity_type="project",
-            entity_id=project.id,
-            new_values={
-                "title": project.title,
-                "budget_allocated": data.budget_allocated,
-            },
-        ))
+        self._db.add(
+            AuditLog(
+                member_id=created_by.id,
+                action=AuditAction.CREATE,
+                entity_type="project",
+                entity_id=project.id,
+                new_values={
+                    "title": project.title,
+                    "budget_allocated": data.budget_allocated,
+                },
+            )
+        )
 
         return ProjectResponse.from_model(project, creator_name=created_by.full_name)
 
@@ -85,9 +85,7 @@ class ProjectService:
         responses = []
         for project in projects:
             creator_name = await self._get_member_name(project.created_by)
-            responses.append(
-                ProjectResponse.from_model(project, creator_name=creator_name)
-            )
+            responses.append(ProjectResponse.from_model(project, creator_name=creator_name))
 
         return responses
 
@@ -113,8 +111,7 @@ class ProjectService:
             "title": project.title,
             "status": project.status,
             "budget_allocated": (
-                float(project.budget_allocated)
-                if project.budget_allocated is not None else None
+                float(project.budget_allocated) if project.budget_allocated is not None else None
             ),
         }
 
@@ -126,7 +123,9 @@ class ProjectService:
 
         # Vérifie la règle métier AVANT de modifier quoi que ce soit
         new_status = data.status or current_status
-        new_budget = data.budget_allocated if data.budget_allocated is not None else project.budget_allocated
+        new_budget = (
+            data.budget_allocated if data.budget_allocated is not None else project.budget_allocated
+        )
 
         if new_status == ProjectStatus.IN_PROGRESS and new_budget is None:
             raise BusinessRuleError(
@@ -140,14 +139,16 @@ class ProjectService:
         for field, value in updates.items():
             setattr(project, field, value)
 
-        self._db.add(AuditLog(
-            member_id=updated_by.id,
-            action=AuditAction.UPDATE,
-            entity_type="project",
-            entity_id=project.id,
-            old_values=old_values,
-            new_values=updates,
-        ))
+        self._db.add(
+            AuditLog(
+                member_id=updated_by.id,
+                action=AuditAction.UPDATE,
+                entity_type="project",
+                entity_id=project.id,
+                old_values=old_values,
+                new_values=updates,
+            )
+        )
 
         creator_name = await self._get_member_name(project.created_by)
         return ProjectResponse.from_model(project, creator_name=creator_name)
@@ -165,9 +166,7 @@ class ProjectService:
 
         # Vérifie s'il y a des transactions liées
         tx_count_result = await self._db.execute(
-            select(func.count(Transaction.id)).where(
-                Transaction.project_id == project.id
-            )
+            select(func.count(Transaction.id)).where(Transaction.project_id == project.id)
         )
         tx_count = tx_count_result.scalar_one()
 
@@ -177,13 +176,15 @@ class ProjectService:
                 f"y sont liées. Passez-le en statut 'cancelled' ou 'abandoned' à la place."
             )
 
-        self._db.add(AuditLog(
-            member_id=deleted_by.id,
-            action=AuditAction.DELETE,
-            entity_type="project",
-            entity_id=project.id,
-            old_values={"title": project.title, "status": project.status},
-        ))
+        self._db.add(
+            AuditLog(
+                member_id=deleted_by.id,
+                action=AuditAction.DELETE,
+                entity_type="project",
+                entity_id=project.id,
+                old_values={"title": project.title, "status": project.status},
+            )
+        )
 
         await self._db.delete(project)
 
@@ -208,9 +209,7 @@ class ProjectService:
                     f"Aucune modification de statut n'est possible."
                 )
 
-            allowed_labels = ", ".join(
-                f"'{_STATUS_LABELS.get(s, s.value)}'" for s in allowed
-            )
+            allowed_labels = ", ".join(f"'{_STATUS_LABELS.get(s, s.value)}'" for s in allowed)
             raise BusinessRuleError(
                 f"Transition de statut invalide : '{current_label}' → '{target_label}'. "
                 f"Depuis '{current_label}', les transitions possibles sont : {allowed_labels}."
@@ -222,9 +221,7 @@ class ProjectService:
         except ValueError as exc:
             raise NotFoundError("Projet", project_id) from exc
 
-        result = await self._db.execute(
-            select(Project).where(Project.id == project_uuid)
-        )
+        result = await self._db.execute(select(Project).where(Project.id == project_uuid))
         project = result.scalar_one_or_none()
 
         if not project:
@@ -233,8 +230,6 @@ class ProjectService:
         return project
 
     async def _get_member_name(self, member_id: uuid.UUID) -> str:
-        result = await self._db.execute(
-            select(Member.full_name).where(Member.id == member_id)
-        )
+        result = await self._db.execute(select(Member.full_name).where(Member.id == member_id))
         name = result.scalar_one_or_none()
         return name or ""

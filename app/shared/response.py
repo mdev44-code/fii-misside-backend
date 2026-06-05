@@ -41,6 +41,7 @@ class APIResponse(BaseModel, Generic[T]):
             data=member_response,
         )
     """
+
     success: bool
     message: str
     data: T | None = None
@@ -63,6 +64,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
             "total_pages": 3    ← nombre de pages au total
         }
     """
+
     success: bool = True
     message: str = "OK"
     data: list[T]
@@ -89,8 +91,9 @@ class PageParams(BaseModel):
             )
             return params.to_response(transactions, total)
     """
-    page: int = 1        # page 1 par défaut
-    per_page: int = 20   # 20 éléments par page par défaut
+
+    page: int = 1  # page 1 par défaut
+    per_page: int = 20  # 20 éléments par page par défaut
 
     @property
     def offset(self) -> int:
@@ -123,6 +126,7 @@ class PageParams(BaseModel):
 # ── Fonctions utilitaires ─────────────────────────────────────────────────────
 # Ces deux fonctions sont les plus utilisées dans les routes.
 # Elles évitent d'écrire le dictionnaire à la main à chaque fois.
+
 
 def success_response(data: Any = None, message: str = "OK") -> dict[str, Any]:
     """

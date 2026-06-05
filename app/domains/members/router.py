@@ -25,6 +25,7 @@ MAX_UPLOAD_SIZE = 5 * 1024 * 1024
 # GET /members/me — Profil du membre connecté
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/me")
 async def get_my_profile(
     current_member=Depends(get_current_member),
@@ -38,6 +39,7 @@ async def get_my_profile(
 # ─────────────────────────────────────────────────────────────────────────────
 # PATCH /members/me — Modifier son profil
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.patch("/me")
 async def update_my_profile(
@@ -57,6 +59,7 @@ async def update_my_profile(
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /members/me/avatar — Uploader sa photo de profil
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/me/avatar")
 async def upload_my_avatar(
@@ -94,6 +97,7 @@ async def upload_my_avatar(
 # GET /members/org-chart — Organigramme
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/org-chart")
 async def get_org_chart(
     current_member=Depends(get_current_member),
@@ -111,6 +115,7 @@ async def get_org_chart(
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /members — Liste de tous les membres
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("")
 async def list_members(
@@ -132,6 +137,7 @@ async def list_members(
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /members/invite — Inviter un membre
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/invite", dependencies=[Depends(require_admin)])
 async def invite_member(
@@ -157,7 +163,8 @@ async def invite_member(
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /members/group-invite — Créer un lien d'invitation groupé
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
+
 @router.post("/group-invite", dependencies=[Depends(require_admin)])
 async def create_group_invite(
     data: CreateGroupInviteRequest,
@@ -170,14 +177,15 @@ async def create_group_invite(
 
     return success_response(
         data=result.model_dump(),
-        message=f"Lien d'invitation groupé créé. Partagez-le dans votre groupe.",
+        message="Lien d'invitation groupé créé. Partagez-le dans votre groupe.",
     )
- 
- 
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /members/group-invite — Lister les liens actifs
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
+
 @router.get("/group-invite", dependencies=[Depends(require_admin)])
 async def list_group_invites(
     current_member=Depends(get_current_member),
@@ -194,12 +202,13 @@ async def list_group_invites(
         data=[inv.model_dump() for inv in invites],
         message=f"{len(invites)} lien(s) d'invitation trouvé(s)",
     )
- 
- 
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DELETE /members/group-invite/{invite_id} — Désactiver un lien
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
+
 @router.delete("/group-invite/{invite_id}", dependencies=[Depends(require_admin)])
 async def deactivate_group_invite(
     invite_id: str,
@@ -215,6 +224,7 @@ async def deactivate_group_invite(
         message="Lien d'invitation désactivé avec succès.",
     )
 
+
 @router.delete("/group-invite/{invite_id}/delete", dependencies=[Depends(require_admin)])
 async def delete_group_invite(
     invite_id: str,
@@ -224,7 +234,7 @@ async def delete_group_invite(
     service = MemberService(db)
     await service.delete_group_invite(invite_id, requested_by=current_member)
     await db.commit()
- 
+
     return success_response(
         message="Lien d'invitation supprimé définitivement.",
     )
@@ -233,6 +243,7 @@ async def delete_group_invite(
 # ─────────────────────────────────────────────────────────────────────────────
 # Routes dynamiques /{member_id} — TOUJOURS EN DERNIER
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/{member_id}")
 async def get_member(
@@ -285,6 +296,7 @@ async def update_member_status(
         message=f"Statut mis à jour : {member.status}",
     )
 
+
 @router.delete("/{member_id}", dependencies=[Depends(require_admin)])
 async def delete_member(
     member_id: str,
@@ -297,9 +309,8 @@ async def delete_member(
         deleted_by=current_member,
     )
     await db.commit()
- 
+
     return success_response(
         data=None,
         message="Membre supprimé avec succès",
     )
- 

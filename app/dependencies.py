@@ -60,9 +60,7 @@ async def get_current_member(
 
     # 3. Charge le membre depuis la BDD
     # scalar_one_or_none() : retourne l'objet ou None (pas d'exception si absent)
-    result = await db.execute(
-        select(Member).where(Member.id == member_id)
-    )
+    result = await db.execute(select(Member).where(Member.id == member_id))
     member = result.scalar_one_or_none()
 
     if not member:
@@ -70,9 +68,6 @@ async def get_current_member(
 
     # 4. Vérifie que le compte est actif
     if member.status != MemberStatus.ACTIVE:
-        raise ForbiddenError(
-            "Votre compte est inactif ou suspendu. "
-            "Contactez l'administrateur."
-        )
+        raise ForbiddenError("Votre compte est inactif ou suspendu. Contactez l'administrateur.")
 
     return member

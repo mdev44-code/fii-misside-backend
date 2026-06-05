@@ -20,10 +20,10 @@ from fastapi import Depends, HTTPException, status
 from app.dependencies import get_current_member
 from app.shared.enums import Role
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUIRE TREASURER — Comptable ou Admin
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def require_treasurer(current_member=Depends(get_current_member)):
     """
@@ -57,6 +57,7 @@ async def require_treasurer(current_member=Depends(get_current_member)):
 # REQUIRE MANAGER — Manager ou Admin
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def require_manager(current_member=Depends(get_current_member)):
     """
     Vérifie que le membre connecté est un manager ou un admin.
@@ -81,6 +82,7 @@ async def require_manager(current_member=Depends(get_current_member)):
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUIRE ADMIN — Admin uniquement
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def require_admin(current_member=Depends(get_current_member)):
     """

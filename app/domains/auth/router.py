@@ -28,15 +28,11 @@ from app.domains.auth.schemas import (
     MeResponse,
     RefreshRequest,
     RegisterFromGroupRequest,
-    RegisterFromInviteRequest
+    RegisterFromInviteRequest,
 )
 from app.domains.auth.service import AuthService
 from app.infrastructure.database.session import get_db
 from app.shared.response import success_response
-
-from app.domains.members.service import MemberService
-
-from app.domains.members.schemas import RegisterFromGroupInviteRequest
 
 # APIRouter : un groupe de routes.
 # prefix et tags sont ajoutés dans main.py au moment de l'inclusion.
@@ -54,10 +50,12 @@ async def login(
     tokens = await service.login(data, ip_address=ip)
     return success_response(data=tokens.model_dump(), message="Connexion réussie")
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /auth/group-invite/{token} — Valider un token de groupe (public)
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
+
 @router.get("/group-invite/{token}")
 async def validate_group_invite(
     token: str,
@@ -65,12 +63,14 @@ async def validate_group_invite(
 ):
     service = AuthService(db)
     result = await service.validate_group_token(token)
-    return success_response(data=result) 
- 
+    return success_response(data=result)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /auth/register-group — S'inscrire via lien groupé (public)
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
+
 @router.post("/register-group")
 async def register_from_group(
     data: RegisterFromGroupRequest,
@@ -87,6 +87,7 @@ async def register_from_group(
         message="Compte créé avec succès. Bienvenue dans l'association !",
     )
 
+
 @router.post("/refresh")
 async def refresh_token(
     data: RefreshRequest,
@@ -95,6 +96,7 @@ async def refresh_token(
     service = AuthService(db)
     tokens = await service.refresh(data.refresh_token)
     return success_response(data=tokens.model_dump(), message="Token renouvelé")
+
 
 @router.post("/logout")
 async def logout(
@@ -106,6 +108,7 @@ async def logout(
     ip = request.client.host if request.client else None
     await service.logout(str(current_member.id), ip_address=ip)
     return success_response(message="Déconnexion réussie")
+
 
 @router.post("/register")
 async def register_from_invite(
@@ -123,6 +126,7 @@ async def register_from_invite(
         message="Compte créé avec succès. Bienvenue !",
     )
 
+
 @router.put("/password")
 async def change_password(
     data: ChangePasswordRequest,
@@ -132,6 +136,7 @@ async def change_password(
     service = AuthService(db)
     await service.change_password(current_member, data)
     return success_response(message="Mot de passe modifié. Veuillez vous reconnecter.")
+
 
 @router.get("/me")
 async def get_me(
@@ -145,11 +150,7 @@ async def get_me(
             email=current_member.email,
             role=current_member.role,
             status=current_member.status,
-            joined_at=(
-                current_member.joined_at.isoformat()
-                if current_member.joined_at
-                else None
-            ),
+            joined_at=(current_member.joined_at.isoformat() if current_member.joined_at else None),
             profile_picture_url=current_member.profile_picture_url,
         ).model_dump()
     )

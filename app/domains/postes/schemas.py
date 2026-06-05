@@ -1,9 +1,9 @@
 from pydantic import BaseModel, field_validator
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUESTS
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class CreatePosteRequest(BaseModel):
     title: str
@@ -42,6 +42,7 @@ class AssignPosteRequest(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 # RESPONSES
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class PosteMemberResponse(BaseModel):
     id: str

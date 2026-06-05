@@ -19,6 +19,7 @@ router = APIRouter()
 # GET /postes — Organigramme complet
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("")
 async def list_postes(
     current_member=Depends(get_current_member),
@@ -40,6 +41,7 @@ async def list_postes(
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /postes — Créer un poste
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("", dependencies=[Depends(require_admin)])
 async def create_poste(
@@ -67,6 +69,7 @@ async def create_poste(
 # GET /postes/{id} — Détail d'un poste
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/{poste_id}")
 async def get_poste(
     poste_id: str,
@@ -86,6 +89,7 @@ async def get_poste(
 # ─────────────────────────────────────────────────────────────────────────────
 # PATCH /postes/{id} — Modifier un poste
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.patch("/{poste_id}", dependencies=[Depends(require_admin)])
 async def update_poste(
@@ -111,6 +115,7 @@ async def update_poste(
 # ─────────────────────────────────────────────────────────────────────────────
 # PATCH /postes/{id}/assign — Attribuer/libérer un poste
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.patch("/{poste_id}/assign", dependencies=[Depends(require_admin)])
 async def assign_poste(
@@ -151,6 +156,7 @@ async def assign_poste(
 # ─────────────────────────────────────────────────────────────────────────────
 # DELETE /postes/{id} — Supprimer un poste
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.delete("/{poste_id}", dependencies=[Depends(require_admin)])
 async def delete_poste(

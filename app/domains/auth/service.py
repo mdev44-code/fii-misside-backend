@@ -10,7 +10,7 @@ Corrections v3 :
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -58,7 +58,6 @@ def verify_password(stored_hash: str, password: str) -> bool:
 
 
 class AuthService:
-
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
@@ -92,7 +91,7 @@ class AuthService:
     # ─────────────────────────────────────────────────────────────────────────
 
     async def refresh(self, refresh_token: str) -> TokenResponse:
-        payload   = decode_token(refresh_token, expected_type="refresh")
+        payload = decode_token(refresh_token, expected_type="refresh")
         member_id = payload.get("sub")
         if not member_id:
             raise InvalidTokenError()
@@ -101,9 +100,7 @@ class AuthService:
         if stored_token != refresh_token:
             raise InvalidTokenError("Refresh token révoqué. Veuillez vous reconnecter.")
 
-        result = await self._db.execute(
-            select(Member).where(Member.id == member_id)
-        )
+        result = await self._db.execute(select(Member).where(Member.id == member_id))
         member = result.scalar_one_or_none()
         if not member:
             raise NotFoundError("Membre")
@@ -116,9 +113,7 @@ class AuthService:
 
     async def logout(self, member_id: str, ip_address: str | None = None) -> None:
         await cache_delete(CacheKeys.refresh_token(member_id))
-        result = await self._db.execute(
-            select(Member).where(Member.id == member_id)
-        )
+        result = await self._db.execute(select(Member).where(Member.id == member_id))
         member = result.scalar_one_or_none()
         if member:
             await self._log(member.id, AuditAction.LOGOUT, "member", member.id, ip_address)
@@ -155,9 +150,7 @@ class AuthService:
             raise InvalidTokenError("Token d'invitation corrompu.")
 
         if token_data.get("type") != "personal":
-            raise InvalidTokenError(
-                "Ce lien est un lien groupé. Utilisez le bon format d'URL."
-            )
+            raise InvalidTokenError("Ce lien est un lien groupé. Utilisez le bon format d'URL.")
 
         try:
             role = Role(token_data.get("role", "member"))
@@ -169,9 +162,7 @@ class AuthService:
             select(Member).where(Member.phone_number == data.phone_number)
         )
         if existing_phone.scalar_one_or_none():
-            raise ConflictError(
-                f"Un compte avec le numéro {data.phone_number} existe déjà."
-            )
+            raise ConflictError(f"Un compte avec le numéro {data.phone_number} existe déjà.")
 
         # 3. Unicité email
         if data.email:
@@ -179,9 +170,7 @@ class AuthService:
                 select(Member).where(Member.email == data.email)
             )
             if existing_email.scalar_one_or_none():
-                raise ConflictError(
-                    f"Un compte avec l'email {data.email} existe déjà."
-                )
+                raise ConflictError(f"Un compte avec l'email {data.email} existe déjà.")
 
         # 4. Crée le membre
         member = Member(
@@ -192,7 +181,7 @@ class AuthService:
             status=MemberStatus.ACTIVE,
             password_hash=hash_password(data.password),
             invitation_token=None,
-            joined_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(UTC),
         )
         self._db.add(member)
         await self._db.flush()  # génère l'UUID sans commit
@@ -221,9 +210,7 @@ class AuthService:
         """
         cached_value = await cache_get(CacheKeys.group_invite_token(data.group_token))
         if not cached_value:
-            raise InvalidTokenError(
-                "Ce lien d'invitation groupée est invalide ou a expiré."
-            )
+            raise InvalidTokenError("Ce lien d'invitation groupée est invalide ou a expiré.")
 
         try:
             token_data = json.loads(cached_value)
@@ -240,18 +227,14 @@ class AuthService:
             select(Member).where(Member.phone_number == data.phone_number)
         )
         if existing_phone.scalar_one_or_none():
-            raise ConflictError(
-                f"Un compte avec le numéro {data.phone_number} existe déjà."
-            )
+            raise ConflictError(f"Un compte avec le numéro {data.phone_number} existe déjà.")
 
         if data.email:
             existing_email = await self._db.execute(
                 select(Member).where(Member.email == data.email)
             )
             if existing_email.scalar_one_or_none():
-                raise ConflictError(
-                    f"Un compte avec l'email {data.email} existe déjà."
-                )
+                raise ConflictError(f"Un compte avec l'email {data.email} existe déjà.")
 
         member = Member(
             full_name=data.full_name,
@@ -261,7 +244,7 @@ class AuthService:
             status=MemberStatus.ACTIVE,
             password_hash=hash_password(data.password),
             invitation_token=None,
-            joined_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(UTC),
         )
         self._db.add(member)
         await self._db.flush()
@@ -322,9 +305,7 @@ class AuthService:
         if not verify_password(member.password_hash, data.current_password):
             raise UnauthorizedError("Mot de passe actuel incorrect")
         if verify_password(member.password_hash, data.new_password):
-            raise BusinessRuleError(
-                "Le nouveau mot de passe doit être différent de l'ancien"
-            )
+            raise BusinessRuleError("Le nouveau mot de passe doit être différent de l'ancien")
         member.password_hash = hash_password(data.new_password)
         await cache_delete(CacheKeys.refresh_token(str(member.id)))
         await self._log(member.id, AuditAction.UPDATE, "member", member.id)
@@ -352,7 +333,7 @@ class AuthService:
         Utilisé par login() ET par les méthodes d'inscription
         (pour éviter d'appeler login() avant commit).
         """
-        access_token  = create_access_token(
+        access_token = create_access_token(
             subject=str(member.id),
             extra_claims={"role": member.role, "name": member.full_name},
         )

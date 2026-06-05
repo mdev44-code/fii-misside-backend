@@ -27,12 +27,8 @@ class Member(Base, UUIDMixin, TimestampMixin):
     full_name: Mapped[str] = mapped_column(String(150), nullable=False)
 
     # index=True : accélère les recherches par téléphone (connexion, vérification doublon)
-    phone_number: Mapped[str] = mapped_column(
-        String(20), unique=True, nullable=False, index=True
-    )
-    email: Mapped[str | None] = mapped_column(
-        String(255), unique=True, nullable=True, index=True
-    )
+    phone_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
     # On ne stocke JAMAIS le mot de passe en clair, seulement son hash bcrypt
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
@@ -43,30 +39,22 @@ class Member(Base, UUIDMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
 
     # Token unique envoyé par l'admin pour créer son compte
-    invitation_token: Mapped[str | None] = mapped_column(
-        String(255), unique=True, nullable=True
-    )
-    invited_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    invitation_token: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Rempli quand le membre finalise son inscription
-    joined_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # ── Photo de profil (AWS S3) ───────────────────────────────────────────────
     # Stocke l'URL publique S3 de la photo uploadée.
     # Null si aucune photo n'a encore été définie.
-    profile_picture_url: Mapped[str | None] = mapped_column(
-        String(500), nullable=True
-    )
+    profile_picture_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # ── Relations ─────────────────────────────────────────────────────────────
     contributions: Mapped[list["Contribution"]] = relationship(
-    "Contribution",
-    back_populates="member",
-    foreign_keys="[Contribution.member_id]",
-    cascade="all, delete-orphan",
+        "Contribution",
+        back_populates="member",
+        foreign_keys="[Contribution.member_id]",
+        cascade="all, delete-orphan",
     )
     notifications: Mapped[list["Notification"]] = relationship(
         back_populates="member", cascade="all, delete-orphan"
@@ -91,9 +79,7 @@ class Member(Base, UUIDMixin, TimestampMixin):
 class AssociationSettings(Base, UUIDMixin):
     __tablename__ = "association_settings"
 
-    contribution_mode: Mapped[str] = mapped_column(
-        String(10), default="free", nullable=False
-    )
+    contribution_mode: Mapped[str] = mapped_column(String(10), default="free", nullable=False)
     fixed_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="XOF", nullable=False)
 
@@ -155,18 +141,14 @@ class TreasuryBalance(Base, UUIDMixin):
     __tablename__ = "treasury_balance"
 
     balance: Mapped[float] = mapped_column(Numeric(14, 2), default=0, nullable=False)
-    initial_balance: Mapped[float] = mapped_column(
-        Numeric(14, 2), default=0, nullable=False
-    )
+    initial_balance: Mapped[float] = mapped_column(Numeric(14, 2), default=0, nullable=False)
 
     initialized_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("members.id", ondelete="SET NULL"),
         nullable=True,
     )
-    initialized_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    initialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -174,9 +156,7 @@ class TreasuryBalance(Base, UUIDMixin):
         nullable=False,
     )
 
-    initializer: Mapped["Member | None"] = relationship(
-        "Member", foreign_keys=[initialized_by]
-    )
+    initializer: Mapped["Member | None"] = relationship("Member", foreign_keys=[initialized_by])
 
     def __repr__(self) -> str:
         return f"<TreasuryBalance {self.balance} XOF>"
@@ -213,9 +193,7 @@ class Transaction(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
 
-    status: Mapped[str] = mapped_column(
-        String(30), default="confirmed", nullable=False
-    )
+    status: Mapped[str] = mapped_column(String(30), default="confirmed", nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     performed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -231,13 +209,9 @@ class Transaction(Base, UUIDMixin, TimestampMixin):
         back_populates="transactions_performed",
         foreign_keys=[performed_by],
     )
-    approver: Mapped["Member | None"] = relationship(
-        "Member", foreign_keys=[approved_by]
-    )
+    approver: Mapped["Member | None"] = relationship("Member", foreign_keys=[approved_by])
     project: Mapped["Project | None"] = relationship(back_populates="transactions")
-    contribution: Mapped["Contribution | None"] = relationship(
-        back_populates="transaction"
-    )
+    contribution: Mapped["Contribution | None"] = relationship(back_populates="transaction")
 
     def __repr__(self) -> str:
         return f"<Transaction {self.type} {self.amount} XOF status={self.status}>"
@@ -251,7 +225,9 @@ class Contribution(Base, UUIDMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint(
-            "member_id", "contribution_month", "contribution_year",
+            "member_id",
+            "contribution_month",
+            "contribution_year",
             name="uq_contribution_member_month_year",
         ),
     )
@@ -268,38 +244,26 @@ class Contribution(Base, UUIDMixin, TimestampMixin):
     )
 
     contribution_month: Mapped[int] = mapped_column(Integer, nullable=False)  # 1–12
-    contribution_year: Mapped[int] = mapped_column(Integer, nullable=False)   # ex: 2026
+    contribution_year: Mapped[int] = mapped_column(Integer, nullable=False)  # ex: 2026
 
     # pending | declared | confirmed
-    status: Mapped[str] = mapped_column(
-        String(20), default="pending", nullable=False
-    )
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
 
     # Montant réellement reçu
     amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
 
     # Snapshot du montant attendu (null en mode free, montant fixe en mode fixed)
-    expected_amount: Mapped[float | None] = mapped_column(
-        Numeric(12, 2), nullable=True
-    )
+    expected_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
 
     # Snapshot du mode actif quand la cotisation a été créée
-    contribution_mode: Mapped[str] = mapped_column(
-        String(10), default="free", nullable=False
-    )
+    contribution_mode: Mapped[str] = mapped_column(String(10), default="free", nullable=False)
 
-    declared_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    declared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # ── Nouveaux champs (v3) ───────────────────────────────────────────────
     # Horodatage exact de l'enregistrement par le comptable
-    recorded_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Qui a enregistré la cotisation (le comptable)
     recorded_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -311,12 +275,8 @@ class Contribution(Base, UUIDMixin, TimestampMixin):
     member: Mapped["Member"] = relationship(
         "Member", back_populates="contributions", foreign_keys=[member_id]
     )
-    recorder: Mapped["Member | None"] = relationship(
-        "Member", foreign_keys=[recorded_by]
-    )
-    transaction: Mapped["Transaction | None"] = relationship(
-        back_populates="contribution"
-    )
+    recorder: Mapped["Member | None"] = relationship("Member", foreign_keys=[recorded_by])
+    transaction: Mapped["Transaction | None"] = relationship(back_populates="contribution")
 
     @property
     def is_complete(self) -> bool:
@@ -386,7 +346,7 @@ class AuditLog(Base, UUIDMixin):
 
     def __repr__(self) -> str:
         return f"<AuditLog {self.action} on {self.entity_type} by {self.member_id}>"
-    
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GROUP INVITATION — Liens d'invitation partageable (multi-usages)
@@ -394,13 +354,12 @@ class AuditLog(Base, UUIDMixin):
 # À AJOUTER dans app/infrastructure/database/models.py
 # après la classe Member (vers la ligne 85)
 
+
 class GroupInvitation(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "group_invitations"
 
     # Token URL-safe unique partagé dans le groupe
-    token: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False, index=True
-    )
+    token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
 
     # Qui a créé ce lien (obligatoirement un admin)
     created_by: Mapped[uuid.UUID] = mapped_column(
@@ -411,17 +370,13 @@ class GroupInvitation(Base, UUIDMixin, TimestampMixin):
 
     # Rôle assigné automatiquement aux inscrits via ce lien
     # Par défaut "member" — l'admin peut choisir un autre rôle
-    default_role: Mapped[str] = mapped_column(
-        String(20), default="member", nullable=False
-    )
+    default_role: Mapped[str] = mapped_column(String(20), default="member", nullable=False)
 
     # Label optionnel pour identifier le lien (ex: "Groupe WhatsApp Mars 2026")
     label: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     # Date d'expiration du lien
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     # Nombre max d'utilisations (None = illimité)
     max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -433,21 +388,18 @@ class GroupInvitation(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Navigation : qui a créé ce lien
-    creator: Mapped["Member"] = relationship(
-        "Member", foreign_keys=[created_by]
-    )
+    creator: Mapped["Member"] = relationship("Member", foreign_keys=[created_by])
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # POSTE — Les postes de l'organigramme
 # ─────────────────────────────────────────────────────────────────────────────
 class Poste(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "postes"
- 
+
     # Titre du poste — unique, pas de doublon possible
-    title: Mapped[str] = mapped_column(
-        String(100), unique=True, nullable=False, index=True
-    )
- 
+    title: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+
     # Membre qui occupe ce poste — UNIQUE = un poste = un seul membre
     # nullable=True car un poste peut être vacant (pas encore attribué)
     member_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -456,25 +408,25 @@ class Poste(Base, UUIDMixin, TimestampMixin):
         unique=True,
         nullable=True,
     )
- 
+
     # ── Relationship ───────────────────────────────────────────────────────
     # Permet d'accéder au membre via poste.member en Python
     member = relationship("Member", backref="poste", lazy="selectin")
- 
+
 
 class BroadcastNotification(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "broadcast_notifications"
- 
+
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
- 
+
     # Qui a déclenché cette notification (NULL = automatique/scheduler)
     triggered_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("members.id", ondelete="SET NULL"),
         nullable=True,
     )
- 
+
     # Relations
     triggered_by_member: Mapped["Member | None"] = relationship(
         "Member",
@@ -484,14 +436,14 @@ class BroadcastNotification(Base, UUIDMixin, TimestampMixin):
         back_populates="notification",
         cascade="all, delete-orphan",
     )
- 
+
     def __repr__(self) -> str:
         return f"<BroadcastNotification type={self.type} at={self.created_at}>"
- 
- 
+
+
 class BroadcastRead(Base):
     __tablename__ = "broadcast_reads"
- 
+
     # Clé primaire composite
     notification_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -510,20 +462,17 @@ class BroadcastRead(Base):
         server_default=func.now(),
         nullable=False,
     )
- 
+
     # Relations
     notification: Mapped["BroadcastNotification"] = relationship(
         back_populates="reads",
     )
     member: Mapped["Member"] = relationship("Member")
- 
-    __table_args__ = (
-        UniqueConstraint("notification_id", "member_id", name="uq_broadcast_read"),
-    )
- 
+
+    __table_args__ = (UniqueConstraint("notification_id", "member_id", name="uq_broadcast_read"),)
+
     def __repr__(self) -> str:
         return (
             f"<BroadcastRead notif={self.notification_id} "
             f"member={self.member_id} at={self.read_at}>"
         )
- 

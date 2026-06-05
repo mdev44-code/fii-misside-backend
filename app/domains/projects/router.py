@@ -19,8 +19,7 @@ async def list_projects(
     status: ProjectStatus | None = Query(
         default=None,
         description=(
-            "Filtrer par statut : draft, in_progress, completed, "
-            "suspended, abandoned, cancelled"
+            "Filtrer par statut : draft, in_progress, completed, suspended, abandoned, cancelled"
         ),
     ),
 ):

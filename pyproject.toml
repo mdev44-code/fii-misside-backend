@@ -1,9 +1,10 @@
 [tool.poetry]
-name = "asso-backend"
+name = "fii-misside-backend"
 version = "0.1.0"
 description = "API de gestion d'association villageoise"
-authors = ["Ton Nom <ton@email.com>"]
+authors = ["Madina <diallomadina222@gmail.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -80,7 +81,13 @@ line-length = 100       # longueur max d'une ligne
 [tool.ruff.lint]
 # E/W = erreurs style, F = erreurs logiques, I = ordre imports, N = nommage
 select = ["E", "F", "I", "N", "W", "UP", "B"]
-ignore = ["E501"]       # ignore les lignes trop longues (géré par line-length)
+ignore = [
+    "E501",
+    "B008",   # Depends/File dans signatures FastAPI — pattern standard
+    "B904",   # raise ... from err
+    "N818",   # AppException sans suffix Error
+    "UP046",  # Generic[T]
+]
 
 # ── Configuration de Pytest ────────────────────────────────────────────────────
 [tool.pytest.ini_options]

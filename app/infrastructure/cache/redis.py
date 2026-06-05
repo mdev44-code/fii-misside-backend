@@ -1,5 +1,3 @@
-from typing import Any
-
 import redis.asyncio as aioredis
 
 from app.config import settings
@@ -45,6 +43,7 @@ def get_redis() -> aioredis.Redis:
 # ── Helpers génériques ────────────────────────────────────────────────────────
 # Ces fonctions wrappent les opérations Redis de base pour un usage plus simple.
 
+
 async def cache_set(key: str, value: str, ttl_seconds: int) -> None:
     """
     Stocke une valeur avec une durée de vie.
@@ -81,6 +80,7 @@ async def cache_exists(key: str) -> bool:
 # Ex : au lieu d'écrire f"refresh_token:{member_id}" partout,
 #      on écrit CacheKeys.refresh_token(member_id)
 
+
 class CacheKeys:
     """Fabrique de clés Redis — nommage cohérent et centralisé."""
 
@@ -95,7 +95,7 @@ class CacheKeys:
     @staticmethod
     def invitation_token(token: str) -> str:
         return f"invitation:{token}"
-    
+
     @staticmethod
     def group_invite_token(token: str) -> str:
         return f"group_invite:{token}"

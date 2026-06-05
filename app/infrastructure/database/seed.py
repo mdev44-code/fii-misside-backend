@@ -21,11 +21,8 @@ async def seed() -> None:
         sys.exit(1)
 
     async with AsyncSessionLocal() as db:
-
         # ── Vérifie si un admin existe déjà ──────────────────────────────────
-        result = await db.execute(
-            select(Member).where(Member.role == Role.ADMIN)
-        )
+        result = await db.execute(select(Member).where(Member.role == Role.ADMIN))
         existing_admin = result.scalar_one_or_none()
 
         if existing_admin:

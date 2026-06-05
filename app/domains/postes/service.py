@@ -20,7 +20,6 @@ from app.shared.exceptions import (
 
 
 class PosteService:
-
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
@@ -38,9 +37,7 @@ class PosteService:
           3. Crée le poste en BDD
         """
         # 1. Unicité du titre
-        existing = await self._db.execute(
-            select(Poste).where(Poste.title.ilike(data.title))
-        )
+        existing = await self._db.execute(select(Poste).where(Poste.title.ilike(data.title)))
         if existing.scalar_one_or_none():
             raise ConflictError(f"Un poste avec le titre '{data.title}' existe déjà")
 
@@ -70,9 +67,7 @@ class PosteService:
         Retourne l'organigramme complet : tous les postes avec leurs titulaires.
         Triés par titre alphabétique.
         """
-        result = await self._db.execute(
-            select(Poste).order_by(Poste.title)
-        )
+        result = await self._db.execute(select(Poste).order_by(Poste.title))
         postes = result.scalars().all()
 
         poste_list = [PosteResponse.from_model(p) for p in postes]
@@ -126,9 +121,7 @@ class PosteService:
             member_uuid = uuid.UUID(data.member_id)
 
             # Vérifie que le membre existe, est actif, et n'occupe pas un AUTRE poste
-            await self._validate_member_available(
-                member_uuid, exclude_poste_id=poste.id
-            )
+            await self._validate_member_available(member_uuid, exclude_poste_id=poste.id)
 
             # Remplacement : pas besoin de libérer explicitement l'ancien,
             # on écrase directement le member_id (l'ancien perd son poste)
@@ -163,9 +156,7 @@ class PosteService:
                 )
             )
             if existing.scalar_one_or_none():
-                raise ConflictError(
-                    f"Un poste avec le titre '{data.title}' existe déjà"
-                )
+                raise ConflictError(f"Un poste avec le titre '{data.title}' existe déjà")
             poste.title = data.title
 
         await self._db.flush()
@@ -192,9 +183,7 @@ class PosteService:
 
     async def _find_poste(self, poste_id: str) -> Poste:
         """Charge un poste par ID ou lève NotFoundError."""
-        result = await self._db.execute(
-            select(Poste).where(Poste.id == uuid.UUID(poste_id))
-        )
+        result = await self._db.execute(select(Poste).where(Poste.id == uuid.UUID(poste_id)))
         poste = result.scalar_one_or_none()
         if not poste:
             raise NotFoundError("Poste", poste_id)
@@ -216,9 +205,7 @@ class PosteService:
         le remplacement sur un poste donné).
         """
         # 1. Le membre existe ?
-        result = await self._db.execute(
-            select(Member).where(Member.id == member_id)
-        )
+        result = await self._db.execute(select(Member).where(Member.id == member_id))
         member = result.scalar_one_or_none()
         if not member:
             raise NotFoundError("Membre", str(member_id))

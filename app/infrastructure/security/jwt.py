@@ -18,7 +18,7 @@ Deux types de tokens dans notre système :
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -29,7 +29,7 @@ from app.shared.exceptions import InvalidTokenError
 
 def _utc_now() -> datetime:
     """Retourne l'heure actuelle en UTC. Centralisé pour éviter les erreurs."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def create_access_token(
@@ -131,8 +131,7 @@ def decode_token(token: str, expected_type: str = "access") -> dict[str, Any]:
 
     if payload.get("type") != expected_type:
         raise InvalidTokenError(
-            f"Type de token invalide. "
-            f"Attendu : '{expected_type}', reçu : '{payload.get('type')}'"
+            f"Type de token invalide. Attendu : '{expected_type}', reçu : '{payload.get('type')}'"
         )
 
     return payload

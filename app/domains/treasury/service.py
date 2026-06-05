@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.domains.notifications.service import NotificationService
 from app.domains.treasury.schemas import (
     BalanceResponse,
     ConfirmDepositRequest,
@@ -28,10 +28,8 @@ from app.shared.enums import (
 )
 from app.shared.exceptions import (
     BusinessRuleError,
-    InsufficientFundsError,
     NotFoundError,
 )
-from app.domains.notifications.service import NotificationService
 
 # Statuts qui interdisent toute nouvelle dépense sur un projet
 _TERMINAL_PROJECT_STATUSES = {
@@ -52,7 +50,6 @@ _STATUS_LABELS: dict[ProjectStatus, str] = {
 
 
 class TreasuryService:
-
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
@@ -86,7 +83,7 @@ class TreasuryService:
         balance.balance = initial_balance
         balance.initial_balance = initial_balance
         balance.initialized_by = treasurer.id
-        balance.initialized_at = datetime.now(timezone.utc)
+        balance.initialized_at = datetime.now(UTC)
 
         # Trace l'initialisation dans l'historique des transactions
         tx = Transaction(
@@ -96,7 +93,7 @@ class TreasuryService:
             performed_by=treasurer.id,
             status=TransactionStatus.CONFIRMED,
             description=f"Initialisation de la caisse : {initial_balance:,.0f} FCFA",
-            performed_at=datetime.now(timezone.utc),
+            performed_at=datetime.now(UTC),
         )
         self._db.add(tx)
 
@@ -136,12 +133,12 @@ class TreasuryService:
         member = member_result.scalar_one_or_none()
         if not member:
             raise NotFoundError("Membre", data.member_id)
- 
+
         # 2. Récupère la caisse
         balance = await self._get_or_create_balance()
         current_balance = float(balance.balance)
         new_balance = current_balance + data.amount
- 
+
         # 3. Crée la transaction
         tx = Transaction(
             type=TransactionType.DEPOSIT,
@@ -150,18 +147,17 @@ class TreasuryService:
             member_id=uuid.UUID(data.member_id),
             performed_by=treasurer.id,
             status=TransactionStatus.CONFIRMED,
-            description=data.description or (
-                f"Cotisation de {member.full_name} — {data.amount:,.0f} FCFA"
-            ),
-            performed_at=datetime.now(timezone.utc),
+            description=data.description
+            or (f"Cotisation de {member.full_name} — {data.amount:,.0f} FCFA"),
+            performed_at=datetime.now(UTC),
         )
         self._db.add(tx)
- 
+
         # 4. Met à jour le solde
         balance.balance = new_balance
- 
+
         await self._db.flush()
- 
+
         # 5. Confirme la contribution du mois en cours
         await self._confirm_contribution(
             member_id=data.member_id,
@@ -169,32 +165,35 @@ class TreasuryService:
             amount=data.amount,
             contribution_id=data.contribution_id,
         )
-        
+
         notification_service = NotificationService(self._db)
         await notification_service.send_contribution_received_broadcast(
             member_name=member.full_name,
             amount=data.amount,
             triggered_by_id=str(treasurer.id),
         )
- 
+
         # 7. Audit log
-        self._db.add(AuditLog(
-            member_id=treasurer.id,
-            action=AuditAction.CONFIRM,
-            entity_type="transaction",
-            entity_id=tx.id,
-            new_values={
-                "amount": data.amount,
-                "member_id": data.member_id,
-                "balance_after": new_balance,
-            },
-        ))
- 
+        self._db.add(
+            AuditLog(
+                member_id=treasurer.id,
+                action=AuditAction.CONFIRM,
+                entity_type="transaction",
+                entity_id=tx.id,
+                new_values={
+                    "amount": data.amount,
+                    "member_id": data.member_id,
+                    "balance_after": new_balance,
+                },
+            )
+        )
+
         return TransactionResponse.from_model(
             tx,
             member_name=member.full_name,
             performed_by_name=treasurer.full_name,
         )
+
     # ─────────────────────────────────────────────────────────────────────────
     # DÉPENSE
     # ─────────────────────────────────────────────────────────────────────────
@@ -206,15 +205,15 @@ class TreasuryService:
     ) -> TransactionResponse:
         balance = await self._get_or_create_balance()
         current_balance = float(balance.balance)
- 
+
         if data.amount > current_balance:
             raise BusinessRuleError(
                 f"Solde insuffisant. Solde actuel : {current_balance:,.0f} FCFA, "
                 f"dépense demandée : {data.amount:,.0f} FCFA."
             )
- 
+
         new_balance = current_balance - data.amount
- 
+
         tx = Transaction(
             type=TransactionType.EXPENSE,
             amount=data.amount,
@@ -223,14 +222,14 @@ class TreasuryService:
             status=TransactionStatus.CONFIRMED,
             description=data.description,
             project_id=uuid.UUID(data.project_id) if data.project_id else None,
-            performed_at=datetime.now(timezone.utc),
+            performed_at=datetime.now(UTC),
         )
         self._db.add(tx)
- 
+
         balance.balance = new_balance
- 
+
         await self._db.flush()
- 
+
         # Met à jour le budget_spent du projet si lié
         if data.project_id:
             project_result = await self._db.execute(
@@ -239,31 +238,34 @@ class TreasuryService:
             project = project_result.scalar_one_or_none()
             if project:
                 project.budget_spent = float(project.budget_spent or 0) + data.amount
- 
+
         notification_service = NotificationService(self._db)
         await notification_service.send_expense_broadcast(
             description=data.description,
             amount=data.amount,
             triggered_by_id=str(treasurer.id),
         )
- 
-        self._db.add(AuditLog(
-            member_id=treasurer.id,
-            action=AuditAction.CREATE,
-            entity_type="transaction",
-            entity_id=tx.id,
-            new_values={
-                "amount": data.amount,
-                "description": data.description,
-                "balance_after": new_balance,
-                "project_id": data.project_id,
-            },
-        ))
- 
+
+        self._db.add(
+            AuditLog(
+                member_id=treasurer.id,
+                action=AuditAction.CREATE,
+                entity_type="transaction",
+                entity_id=tx.id,
+                new_values={
+                    "amount": data.amount,
+                    "description": data.description,
+                    "balance_after": new_balance,
+                    "project_id": data.project_id,
+                },
+            )
+        )
+
         return TransactionResponse.from_model(
             tx,
             performed_by_name=treasurer.full_name,
         )
+
     # ─────────────────────────────────────────────────────────────────────────
     # LECTURE
     # ─────────────────────────────────────────────────────────────────────────
@@ -285,10 +287,7 @@ class TreasuryService:
         return BalanceResponse(
             balance=float(balance.balance),
             initial_balance=float(balance.initial_balance),
-            initialized_at=(
-                balance.initialized_at.isoformat()
-                if balance.initialized_at else None
-            ),
+            initialized_at=(balance.initialized_at.isoformat() if balance.initialized_at else None),
             initialized_by_name=initialized_by_name,
         )
 
@@ -309,11 +308,7 @@ class TreasuryService:
             count_stmt = count_stmt.where(Transaction.type == transaction_type)
 
         # Plus récent en premier
-        stmt = (
-            stmt.order_by(Transaction.performed_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = stmt.order_by(Transaction.performed_at.desc()).limit(limit).offset(offset)
 
         result = await self._db.execute(stmt)
         transactions = result.scalars().all()
@@ -345,12 +340,14 @@ class TreasuryService:
             )
             performed_by_name = performer_result.scalar_one_or_none() or ""
 
-            responses.append(TransactionResponse.from_model(
-                tx,
-                member_name=member_name,
-                project_title=project_title,
-                performed_by_name=performed_by_name,
-            ))
+            responses.append(
+                TransactionResponse.from_model(
+                    tx,
+                    member_name=member_name,
+                    project_title=project_title,
+                    performed_by_name=performed_by_name,
+                )
+            )
 
         return responses, total
 
@@ -388,18 +385,20 @@ class TreasuryService:
             project.status = ProjectStatus.IN_PROGRESS
 
             # Audit log pour tracer le changement automatique de statut
-            self._db.add(AuditLog(
-                member_id=treasurer.id,
-                action=AuditAction.UPDATE,
-                entity_type="project",
-                entity_id=project.id,
-                old_values={"status": old_status},
-                new_values={
-                    "status": ProjectStatus.IN_PROGRESS,
-                    "auto_transition": True,
-                    "reason": "Dépense enregistrée — passage automatique en cours",
-                },
-            ))
+            self._db.add(
+                AuditLog(
+                    member_id=treasurer.id,
+                    action=AuditAction.UPDATE,
+                    entity_type="project",
+                    entity_id=project.id,
+                    old_values={"status": old_status},
+                    new_values={
+                        "status": ProjectStatus.IN_PROGRESS,
+                        "auto_transition": True,
+                        "reason": "Dépense enregistrée — passage automatique en cours",
+                    },
+                )
+            )
 
     async def _confirm_contribution(
         self,
@@ -410,7 +409,7 @@ class TreasuryService:
     ) -> None:
         from app.infrastructure.database.models import AssociationSettings
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Lit le mode de cotisation actuel depuis la BDD
         settings_result = await self._db.execute(select(AssociationSettings))
@@ -427,9 +426,7 @@ class TreasuryService:
         # Cas 1 : contribution_id explicitement fourni
         if contribution_id:
             result = await self._db.execute(
-                select(Contribution).where(
-                    Contribution.id == uuid.UUID(contribution_id)
-                )
+                select(Contribution).where(Contribution.id == uuid.UUID(contribution_id))
             )
             contribution = result.scalar_one_or_none()
             if contribution:
@@ -472,5 +469,3 @@ class TreasuryService:
                 confirmed_at=now,
             )
             self._db.add(new_contribution)
-
-    

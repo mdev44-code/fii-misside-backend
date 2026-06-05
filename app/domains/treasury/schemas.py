@@ -14,16 +14,17 @@ Règle importante sur les montants :
 
 from pydantic import BaseModel, field_validator
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUESTS
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class InitBalanceRequest(BaseModel):
     """
     Initialisation de la caisse par le comptable.
     Saisie unique pour synchroniser l'app avec la caisse physique existante.
     """
+
     initial_balance: float
 
     @field_validator("initial_balance")
@@ -44,6 +45,7 @@ class ConfirmDepositRequest(BaseModel):
     contribution_id: optionnel — pour lier à une contribution déclarée existante
     description    : note optionnelle (ex: "cotisation juillet 2025")
     """
+
     member_id: str
     amount: float
     contribution_id: str | None = None
@@ -66,6 +68,7 @@ class ExpenseRequest(BaseModel):
     project_id : optionnel — lié à un projet si c'est pour un projet
                  null si c'est une dépense générale (frais, fournitures...)
     """
+
     amount: float
     description: str
     project_id: str | None = None
@@ -92,11 +95,13 @@ class ExpenseRequest(BaseModel):
 # RESPONSES
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class BalanceResponse(BaseModel):
     """
     Solde actuel de la caisse.
     Retourné par GET /treasury/balance.
     """
+
     balance: float
     initial_balance: float
     initialized_at: str | None
@@ -112,19 +117,22 @@ class TransactionResponse(BaseModel):
     member_name   : nom du membre concerné (pour les dépôts)
     project_title : titre du projet concerné (pour les dépenses liées)
     """
+
     id: str
     type: str
     amount: float
     balance_after: float
     description: str | None
-    member_name: str | None     # null pour les dépenses et ajustements
-    project_title: str | None   # null si pas lié à un projet
-    performed_by_name: str      # comptable qui a enregistré
+    member_name: str | None  # null pour les dépenses et ajustements
+    project_title: str | None  # null si pas lié à un projet
+    performed_by_name: str  # comptable qui a enregistré
     status: str
     performed_at: str
 
     @classmethod
-    def from_model(cls, tx, member_name=None, project_title=None, performed_by_name="") -> "TransactionResponse":
+    def from_model(
+        cls, tx, member_name=None, project_title=None, performed_by_name=""
+    ) -> "TransactionResponse":
         """
         Convertit un objet Transaction SQLAlchemy en TransactionResponse.
         Les noms sont passés en paramètre car ils viennent de jointures

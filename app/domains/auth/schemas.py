@@ -1,4 +1,5 @@
 import re
+
 from pydantic import BaseModel, field_validator
 
 ALLOWED_COUNTRY_CODES = ("+221", "+224")
@@ -10,14 +11,14 @@ def _validate_phone(v: str) -> str:
     if cleaned.startswith("+"):
         # Numéro complet fourni — vérifie l'indicatif
         if not any(cleaned.startswith(code) for code in ALLOWED_COUNTRY_CODES):
-            raise ValueError(
-                "Indicatif non autorisé. Utilisez +221 (Sénégal) ou +224 (Guinée)."
-            )
+            raise ValueError("Indicatif non autorisé. Utilisez +221 (Sénégal) ou +224 (Guinée).")
         digits_after = cleaned[4:]
         if not digits_after.isdigit():
             raise ValueError("Le numéro ne doit contenir que des chiffres après l'indicatif.")
         if len(digits_after) < 7 or len(digits_after) > 10:
-            raise ValueError("Numéro invalide (longueur attendue : 7-10 chiffres après l'indicatif).")
+            raise ValueError(
+                "Numéro invalide (longueur attendue : 7-10 chiffres après l'indicatif)."
+            )
         return cleaned
 
     # Chiffres locaux — on accepte, le frontend aura déjà préfixé l'indicatif
@@ -32,7 +33,7 @@ def _validate_email(v: str | None) -> str | None:
     if not v:
         return None
     v = v.strip().lower()
-    if not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', v):
+    if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", v):
         raise ValueError("Format d'email invalide. Exemple : nom@domaine.com")
     return v
 
@@ -40,6 +41,7 @@ def _validate_email(v: str | None) -> str | None:
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUESTS
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class LoginRequest(BaseModel):
     identifier: str
@@ -60,6 +62,7 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     """Renouveler le token d'accès."""
+
     refresh_token: str
 
 
@@ -69,6 +72,7 @@ class RegisterFromInviteRequest(BaseModel):
     Le token contient le rôle (stocké dans Redis).
     Le membre renseigne toutes ses informations.
     """
+
     token: str
     full_name: str
     phone_number: str
@@ -106,6 +110,7 @@ class RegisterFromGroupRequest(BaseModel):
     Inscription depuis un lien d'invitation groupée.
     Le lien reste réutilisable après l'inscription.
     """
+
     group_token: str
     full_name: str
     phone_number: str
@@ -140,6 +145,7 @@ class RegisterFromGroupRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     """Changer son mot de passe depuis le profil."""
+
     current_password: str
     new_password: str
 
@@ -155,8 +161,10 @@ class ChangePasswordRequest(BaseModel):
 # RESPONSES
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TokenResponse(BaseModel):
     """Retourné après login ou register."""
+
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
@@ -170,6 +178,7 @@ class MeResponse(BaseModel):
     Profil du membre connecté — retourné par GET /auth/me.
     Inclut profile_picture_url pour l'affichage de l'avatar.
     """
+
     id: str
     full_name: str
     phone_number: str

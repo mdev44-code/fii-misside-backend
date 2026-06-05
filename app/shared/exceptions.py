@@ -64,6 +64,7 @@ class NotFoundError(AppException):
         raise NotFoundError("Projet")
         → message : "Projet introuvable"
     """
+
     def __init__(self, resource: str, identifier: Any = None) -> None:
         message = f"{resource} introuvable"
         if identifier:
@@ -82,6 +83,7 @@ class ForbiddenError(AppException):
 
     Ex : un membre normal essaie d'accéder à une route réservée au comptable.
     """
+
     def __init__(self, message: str = "Accès refusé") -> None:
         super().__init__(
             message=message,
@@ -97,6 +99,7 @@ class UnauthorizedError(AppException):
 
     Ex : requête sans token, token expiré.
     """
+
     def __init__(self, message: str = "Authentification requise") -> None:
         super().__init__(
             message=message,
@@ -114,6 +117,7 @@ class ConflictError(AppException):
     Usage :
         raise ConflictError("Ce numéro de téléphone est déjà utilisé")
     """
+
     def __init__(self, message: str) -> None:
         super().__init__(
             message=message,
@@ -133,6 +137,7 @@ class ValidationError(AppException):
     Usage :
         raise ValidationError("La date de fin doit être après la date de début")
     """
+
     def __init__(self, message: str, details: Any = None) -> None:
         super().__init__(
             message=message,
@@ -157,6 +162,7 @@ class BusinessRuleError(AppException):
             "Impossible de démarrer un projet sans budget défini."
         )
     """
+
     def __init__(self, message: str) -> None:
         super().__init__(
             message=message,
@@ -173,6 +179,7 @@ class InsufficientFundsError(AppException):
         raise InsufficientFundsError(available=150_000, requested=200_000)
         → message : "Fonds insuffisants. Disponible : 150 000 FCFA, Demandé : 200 000 FCFA"
     """
+
     def __init__(self, available: float, requested: float) -> None:
         super().__init__(
             message=(
@@ -194,6 +201,7 @@ class InvalidTokenError(AppException):
         raise InvalidTokenError()
         raise InvalidTokenError("Lien d'invitation expiré")
     """
+
     def __init__(self, message: str = "Token invalide ou expiré") -> None:
         super().__init__(
             message=message,

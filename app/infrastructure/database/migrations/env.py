@@ -1,11 +1,13 @@
 import os
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
+
 from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+import app.infrastructure.database.models  # noqa: F401 — force l'enregistrement des tables
 
 # ← Import critique : tes modèles + Base
 from app.infrastructure.database.base import Base
-import app.infrastructure.database.models  # noqa: F401 — force l'enregistrement des tables
 
 config = context.config
 
@@ -17,8 +19,7 @@ target_metadata = Base.metadata
 
 # ← Surcharge l'URL depuis la variable d'environnement
 database_url_sync = os.getenv(
-    "DATABASE_URL_SYNC",
-    "postgresql://postgres:password@localhost:5432/fii_misside_db"
+    "DATABASE_URL_SYNC", "postgresql://postgres:password@localhost:5432/fii_misside_db"
 )
 config.set_main_option("sqlalchemy.url", database_url_sync)
 

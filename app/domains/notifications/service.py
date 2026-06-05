@@ -1,15 +1,13 @@
 import uuid as uuid_module
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.database.models import Member
 from app.shared.enums import NotificationType
 
 
 class NotificationService:
-
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
@@ -20,8 +18,19 @@ class NotificationService:
     def _contribution_reminder_text(self, month: int, year: int, amount: float | None) -> str:
         """Rappel mensuel de cotisation — déclenché automatiquement."""
         month_names = [
-            "", "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
-            "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+            "",
+            "Janvier",
+            "Février",
+            "Mars",
+            "Avril",
+            "Mai",
+            "Juin",
+            "Juillet",
+            "Août",
+            "Septembre",
+            "Octobre",
+            "Novembre",
+            "Décembre",
         ]
         month_name = month_names[month]
         if amount:
@@ -36,17 +45,11 @@ class NotificationService:
 
     def _contribution_received_text(self, member_name: str, amount: float) -> str:
         """Annonce qu'un membre a cotisé — déclenché par le comptable."""
-        return (
-            f"{member_name} a cotisé {amount:,.0f} FCFA. "
-            f"Merci pour sa contribution !"
-        )
+        return f"{member_name} a cotisé {amount:,.0f} FCFA. Merci pour sa contribution !"
 
     def _expense_text(self, description: str, amount: float) -> str:
         """Annonce d'une dépense enregistrée par le comptable."""
-        return (
-            f"Nouvelle dépense : {description} — "
-            f"{amount:,.0f} FCFA."
-        )
+        return f"Nouvelle dépense : {description} — {amount:,.0f} FCFA."
 
     # ─────────────────────────────────────────────────────────────────────────
     # MÉTHODES PUBLIQUES — appelées par les services métier
@@ -204,9 +207,7 @@ class NotificationService:
 
         # Vérifie que la notification existe
         notif_result = await self._db.execute(
-            select(BroadcastNotification).where(
-                BroadcastNotification.id == notif_uuid
-            )
+            select(BroadcastNotification).where(BroadcastNotification.id == notif_uuid)
         )
         if not notif_result.scalar_one_or_none():
             return False
@@ -225,7 +226,7 @@ class NotificationService:
         read = BroadcastRead(
             notification_id=notif_uuid,
             member_id=member_uuid,
-            read_at=datetime.now(timezone.utc),
+            read_at=datetime.now(UTC),
         )
         self._db.add(read)
         await self._db.flush()
@@ -264,7 +265,7 @@ class NotificationService:
         if not unread_ids:
             return 0
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for notif_id in unread_ids:
             self._db.add(
                 BroadcastRead(
@@ -329,9 +330,7 @@ class NotificationService:
         notif = BroadcastNotification(
             type=notification_type.value,
             content=content,
-            triggered_by=(
-                uuid_module.UUID(triggered_by) if triggered_by else None
-            ),
+            triggered_by=(uuid_module.UUID(triggered_by) if triggered_by else None),
         )
         self._db.add(notif)
         await self._db.flush()

@@ -33,6 +33,7 @@ class NotificationPayload:
     message         : texte du message à envoyer
     notification_type : type pour catégoriser dans la BDD
     """
+
     recipient_phone: str
     recipient_id: str
     message: str

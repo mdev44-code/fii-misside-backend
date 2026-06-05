@@ -19,10 +19,10 @@ from pydantic import BaseModel, field_validator
 
 from app.shared.enums import ProjectStatus
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUESTS
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class CreateProjectRequest(BaseModel):
     """
@@ -31,6 +31,7 @@ class CreateProjectRequest(BaseModel):
     Seul title est obligatoire — on peut créer un projet
     à l'état d'idée sans connaître encore le budget ni les dates.
     """
+
     title: str
     description: str | None = None
     budget_allocated: float | None = None
@@ -67,6 +68,7 @@ class UpdateProjectRequest(BaseModel):
     Règle métier : passer en "in_progress" sans budget → erreur
     Cette vérification est dans le service, pas ici.
     """
+
     title: str | None = None
     description: str | None = None
     budget_allocated: float | None = None
@@ -95,6 +97,7 @@ class UpdateProjectRequest(BaseModel):
 # RESPONSES
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class ProjectResponse(BaseModel):
     """
     Représentation publique d'un projet.
@@ -105,6 +108,7 @@ class ProjectResponse(BaseModel):
     creator_name : nom du membre qui a créé le projet.
     Chargé séparément dans le service pour éviter une jointure complexe.
     """
+
     id: str
     title: str
     description: str | None
@@ -132,20 +136,13 @@ class ProjectResponse(BaseModel):
             description=project.description,
             status=project.status,
             budget_allocated=(
-                float(project.budget_allocated)
-                if project.budget_allocated is not None else None
+                float(project.budget_allocated) if project.budget_allocated is not None else None
             ),
             budget_spent=float(project.budget_spent),
             budget_remaining=project.budget_remaining,
             creator_name=creator_name,
-            start_date=(
-                project.start_date.isoformat()
-                if project.start_date else None
-            ),
-            end_date=(
-                project.end_date.isoformat()
-                if project.end_date else None
-            ),
+            start_date=(project.start_date.isoformat() if project.start_date else None),
+            end_date=(project.end_date.isoformat() if project.end_date else None),
             created_at=project.created_at.isoformat(),
             updated_at=project.updated_at.isoformat(),
         )

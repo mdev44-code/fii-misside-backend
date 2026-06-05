@@ -27,7 +27,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,  # DATABASE_URL = database_url, peu importe la casse
-        extra="ignore",        # ignore les variables inconnues dans .env
+        extra="ignore",  # ignore les variables inconnues dans .env
     )
 
     # ── Application ───────────────────────────────────────────────────────────

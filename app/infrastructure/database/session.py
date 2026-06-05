@@ -37,7 +37,7 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,  # on gère les commits manuellement
-    autoflush=False,   # on contrôle quand les changements sont envoyés à la BDD
+    autoflush=False,  # on contrôle quand les changements sont envoyés à la BDD
 )
 
 
@@ -63,10 +63,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     async with AsyncSessionLocal() as session:
         try:
-            yield session          # ← la route reçoit la session ici
-            await session.commit() # ← succès : on sauvegarde en BDD
+            yield session  # ← la route reçoit la session ici
+            await session.commit()  # ← succès : on sauvegarde en BDD
         except Exception:
             await session.rollback()  # ← erreur : on annule tout
-            raise                     # ← on relaie l'exception pour que FastAPI la gère
+            raise  # ← on relaie l'exception pour que FastAPI la gère
         finally:
             await session.close()  # ← toujours fermé, même en cas d'erreur

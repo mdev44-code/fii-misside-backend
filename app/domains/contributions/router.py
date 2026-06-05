@@ -1,10 +1,13 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_member
-from app.domains.contributions.schemas import TreasurerAddContributionRequest, UpdateAssociationSettingsRequest
+from app.domains.contributions.schemas import (
+    TreasurerAddContributionRequest,
+    UpdateAssociationSettingsRequest,
+)
 from app.domains.contributions.service import ContributionService
 from app.infrastructure.database.session import get_db
 from app.infrastructure.security.permissions import require_admin, require_treasurer
@@ -34,7 +37,7 @@ async def get_monthly_status(
     month: int | None = Query(default=None, ge=1, le=12),
     year: int | None = Query(default=None, ge=2020),
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     target_month = month or now.month
     target_year = year or now.year
 
@@ -81,9 +84,11 @@ async def update_settings(
         message=message,
     )
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /contributions — Enregistrement d'une cotisation (comptable uniquement)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("", dependencies=[Depends(require_treasurer)])
 async def add_contribution(
@@ -97,7 +102,7 @@ async def add_contribution(
         treasurer=current_member,
     )
     await db.commit()
- 
+
     return success_response(
         data=contribution.model_dump(),
         message=(
@@ -106,10 +111,12 @@ async def add_contribution(
         ),
     )
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /contributions/me — Mes cotisations
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
+
 @router.get("/me")
 async def get_my_contributions(
     current_member=Depends(get_current_member),
@@ -117,17 +124,18 @@ async def get_my_contributions(
 ):
     service = ContributionService(db)
     contributions = await service.get_my_contributions(current_member)
- 
+
     return success_response(
         data=[c.model_dump() for c in contributions],
         message=f"{len(contributions)} cotisation(s) trouvée(s)",
     )
- 
- 
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /contributions — Toutes les cotisations (avec filtres)
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
+
 @router.get("")
 async def list_contributions(
     current_member=Depends(get_current_member),
@@ -138,12 +146,14 @@ async def list_contributions(
     ),
     month: int | None = Query(
         default=None,
-        ge=1, le=12,
+        ge=1,
+        le=12,
         description="Filtrer par mois (1-12)",
     ),
     year: int | None = Query(
         default=None,
-        ge=2020, le=2100,
+        ge=2020,
+        le=2100,
         description="Filtrer par année (ex: 2026)",
     ),
 ):
@@ -153,9 +163,8 @@ async def list_contributions(
         month=month,
         year=year,
     )
- 
+
     return success_response(
         data=[c.model_dump() for c in contributions],
         message=f"{len(contributions)} cotisation(s) trouvée(s)",
     )
- 

@@ -17,7 +17,7 @@ Les deux sont complémentaires :
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,7 +70,7 @@ class InAppChannel(BaseNotificationChannel):
                 type=NotificationType(payload.notification_type),
                 status=NotificationStatus.SENT,
                 content=payload.message,
-                sent_at=datetime.now(timezone.utc),
+                sent_at=datetime.now(UTC),
             )
             self._db.add(notification)
             # flush() envoie l'INSERT à PostgreSQL sans committer

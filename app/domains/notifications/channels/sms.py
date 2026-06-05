@@ -86,7 +86,7 @@ class SMSChannel(BaseNotificationChannel):
             recipients = response.get("SMSMessageData", {}).get("Recipients", [])
 
             if not recipients:
-                print(f"⚠️ SMS : aucun destinataire dans la réponse AT")
+                print("⚠️ SMS : aucun destinataire dans la réponse AT")
                 return False
 
             status = recipients[0].get("status", "")
@@ -94,10 +94,7 @@ class SMSChannel(BaseNotificationChannel):
                 print(f"✅ SMS envoyé à {payload.recipient_phone}")
                 return True
             else:
-                print(
-                    f"❌ SMS échoué pour {payload.recipient_phone} "
-                    f"— statut : {status}"
-                )
+                print(f"❌ SMS échoué pour {payload.recipient_phone} — statut : {status}")
                 return False
 
         except Exception as e:

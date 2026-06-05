@@ -12,16 +12,13 @@ Configuration nécessaire dans .env :
   AWS_S3_ENDPOINT_URL=             # optionnel : pour MinIO ou S3-compatible
 """
 
-import io
 import uuid
-from typing import BinaryIO
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
 from app.config import settings
 from app.shared.exceptions import BusinessRuleError
-
 
 # Extensions d'image autorisées
 ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
@@ -65,9 +62,7 @@ def _validate_image(file_content: bytes, content_type: str, filename: str) -> st
         )
 
     if content_type not in ALLOWED_CONTENT_TYPES:
-        raise BusinessRuleError(
-            f"Format d'image non autorisé. Formats acceptés : JPG, PNG, WebP"
-        )
+        raise BusinessRuleError("Format d'image non autorisé. Formats acceptés : JPG, PNG, WebP")
 
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in ALLOWED_EXTENSIONS:
@@ -118,14 +113,10 @@ async def upload_profile_picture(
             },
         )
     except NoCredentialsError:
-        raise BusinessRuleError(
-            "Configuration AWS manquante. Contactez l'administrateur système."
-        )
+        raise BusinessRuleError("Configuration AWS manquante. Contactez l'administrateur système.")
     except ClientError as e:
         error_code = e.response["Error"]["Code"]
-        raise BusinessRuleError(
-            f"Erreur lors de l'upload de la photo ({error_code}). Réessayez."
-        )
+        raise BusinessRuleError(f"Erreur lors de l'upload de la photo ({error_code}). Réessayez.")
 
     # Construction de l'URL publique
     if settings.aws_s3_endpoint_url:

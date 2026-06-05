@@ -27,6 +27,7 @@ class Base(DeclarativeBase):
             __tablename__ = "members"
             ...
     """
+
     pass
 
 
@@ -42,6 +43,7 @@ class UUIDMixin:
     Mapped[uuid.UUID] = type Python de la colonne
     mapped_column(...)  = définition de la colonne SQL
     """
+
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),  # stocké comme vrai UUID en PostgreSQL
         primary_key=True,
@@ -60,6 +62,7 @@ class TimestampMixin:
     Avantage : même si tu oublies de fournir ces valeurs depuis Python,
     la base de données les gère elle-même.
     """
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

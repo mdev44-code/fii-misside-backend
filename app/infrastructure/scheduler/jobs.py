@@ -10,6 +10,8 @@ Il envoie simplement un rappel commun à tout le monde
 entre le 1er et le 15 de chaque mois.
 """
 
+from datetime import UTC
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -31,14 +33,15 @@ async def send_contribution_reminder_broadcast() -> None:
       - 1 seul INSERT dans broadcast_notifications
       - Tous les membres verront le rappel à leur prochaine connexion
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
+
+    from sqlalchemy import select
 
     from app.domains.notifications.service import NotificationService
     from app.infrastructure.database.models import AssociationSettings
     from app.infrastructure.database.session import AsyncSessionLocal
-    from sqlalchemy import select
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Vérifie qu'on est dans la période de rappel (1er au 15)
     if not (
