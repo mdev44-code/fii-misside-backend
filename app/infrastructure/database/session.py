@@ -22,10 +22,14 @@ from app.config import settings
 # create_async_engine crée le moteur de connexion async.
 # pool_pre_ping=True : avant d'utiliser une connexion du pool, vérifie
 # qu'elle est encore active (évite les erreurs si PostgreSQL a redémarré)
+_database_url = settings.database_url
+if _database_url.startswith("postgresql://"):
+    _database_url = _database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 engine = create_async_engine(
-    settings.database_url,
+    _database_url,
     pool_pre_ping=True,
-    echo=settings.debug,  # si True, affiche chaque requête SQL dans les logs
+    echo=settings.debug,
 )
 
 # ── Session factory ───────────────────────────────────────────────────────────
