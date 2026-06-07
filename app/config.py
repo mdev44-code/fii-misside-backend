@@ -70,8 +70,9 @@ class Settings(BaseSettings):
     aws_access_key_id: str = Field(default="", env="AWS_ACCESS_KEY_ID")
     aws_secret_access_key: str = Field(default="", env="AWS_SECRET_ACCESS_KEY")
     aws_s3_bucket_name: str = Field(default="", env="AWS_S3_BUCKET_NAME")
-    aws_s3_region: str = Field(default="eu-west-3", env="AWS_S3_REGION")
+    aws_s3_region: str = Field(default="auto", env="AWS_S3_REGION")
     aws_s3_endpoint_url: str | None = Field(default=None, env="AWS_S3_ENDPOINT_URL")
+    aws_s3_public_url: str | None = Field(default=None, env="AWS_S3_PUBLIC_URL")
 
     # ── Admin initial ─────────────────────────────────────────────────────────
     first_admin_phone: str = ""

@@ -120,10 +120,9 @@ async def upload_profile_picture(
 
     # Construction de l'URL publique
     if settings.aws_s3_endpoint_url:
-        # Pour MinIO ou endpoint custom
-        url = f"{settings.aws_s3_endpoint_url}/{settings.aws_s3_bucket_name}/{s3_key}"
+        public_base = settings.aws_s3_public_url or f"{settings.aws_s3_endpoint_url}/{settings.aws_s3_bucket_name}"
+        url = f"{public_base}/{s3_key}"
     else:
-        # URL S3 standard AWS
         url = f"https://{settings.aws_s3_bucket_name}.s3.{settings.aws_s3_region}.amazonaws.com/{s3_key}"
 
     return url
