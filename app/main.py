@@ -38,6 +38,8 @@ _ALLOWED_ORIGINS: set[str] = set(settings.cors_origins) | {
     "http://127.0.0.1:4200",
 }
 
+print(f"✅ ALLOWED_ORIGINS: {_ALLOWED_ORIGINS}")
+
 
 class CORSMiddleware(BaseHTTPMiddleware):
     """
