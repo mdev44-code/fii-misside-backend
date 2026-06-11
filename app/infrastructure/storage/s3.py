@@ -1,8 +1,9 @@
+import unicodedata
 import uuid
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
-import unicodedata
+
 from app.config import settings
 from app.shared.exceptions import BusinessRuleError
 
