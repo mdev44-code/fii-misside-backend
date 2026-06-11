@@ -19,10 +19,12 @@ ALLOWED_CONTENT_TYPES = {
     "image/png",
 }
 
+
 def _sanitize_metadata(value: str) -> str:
     """Encode les caractères non-ASCII pour les métadonnées S3."""
     normalized = unicodedata.normalize("NFKD", value)
     return normalized.encode("ascii", errors="ignore").decode("ascii")
+
 
 def _get_s3_client():
     kwargs = {
