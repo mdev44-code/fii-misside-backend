@@ -54,7 +54,7 @@ async def get_monthly_status(
     )
 
 
-@router.get("/settings")
+@router.get("/settings", dependencies=[Depends(require_treasurer)])
 async def get_settings(
     current_member=Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
@@ -65,7 +65,7 @@ async def get_settings(
     return success_response(data=settings.model_dump())
 
 
-@router.patch("/settings", dependencies=[Depends(require_admin)])
+@router.patch("/settings", dependencies=[Depends(require_treasurer)])
 async def update_settings(
     data: UpdateAssociationSettingsRequest,
     current_member=Depends(get_current_member),
