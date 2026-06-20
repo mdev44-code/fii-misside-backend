@@ -10,7 +10,7 @@ from app.domains.contributions.schemas import (
 )
 from app.domains.contributions.service import ContributionService
 from app.infrastructure.database.session import get_db
-from app.infrastructure.security.permissions import require_admin, require_treasurer
+from app.infrastructure.security.permissions import require_treasurer
 from app.shared.response import success_response
 
 router = APIRouter()
