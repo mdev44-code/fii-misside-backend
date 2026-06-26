@@ -156,6 +156,7 @@ class ChangePasswordRequest(BaseModel):
             raise ValueError("Le nouveau mot de passe doit contenir au moins 8 caractères")
         return v
 
+
 class ForgotPasswordRequest(BaseModel):
     """Étape 1 : demande d'un code de réinitialisation par email."""
 

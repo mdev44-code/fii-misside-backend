@@ -73,6 +73,7 @@ async def cache_exists(key: str) -> bool:
     """Vérifie si une clé existe encore (pas expirée)."""
     return bool(await get_redis().exists(key))
 
+
 async def cache_incr(key: str, ttl_seconds: int) -> int:
     """
     Incrémente un compteur atomiquement et pose le TTL au 1er appel.

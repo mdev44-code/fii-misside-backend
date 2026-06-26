@@ -45,10 +45,11 @@ from app.shared.exceptions import (
 
 _hasher = PasswordHasher()
 # ── Réinitialisation de mot de passe ─────────────────────────────────────────
-_PWD_RESET_CODE_TTL = 5 * 60      # code OTP valable 5 minutes
-_PWD_RESET_TOKEN_TTL = 10 * 60    # reset_token valable 10 minutes
-_PWD_RESET_COOLDOWN = 60          # anti-spam : délai entre deux demandes (s)
-_MAX_CODE_ATTEMPTS = 5            # tentatives max avant blocage
+_PWD_RESET_CODE_TTL = 5 * 60  # code OTP valable 5 minutes
+_PWD_RESET_TOKEN_TTL = 10 * 60  # reset_token valable 10 minutes
+_PWD_RESET_COOLDOWN = 60  # anti-spam : délai entre deux demandes (s)
+_MAX_CODE_ATTEMPTS = 5  # tentatives max avant blocage
+
 
 def hash_password(password: str) -> str:
     return _hasher.hash(password)
@@ -316,7 +317,6 @@ class AuthService:
         await cache_delete(CacheKeys.refresh_token(str(member.id)))
         await self._log(member.id, AuditAction.UPDATE, "member", member.id)
 
-
     # ─────────────────────────────────────────────────────────────────────────
     # MOT DE PASSE OUBLIÉ — Étape 1 : demande de code
     # ─────────────────────────────────────────────────────────────────────────
@@ -408,21 +408,15 @@ class AuthService:
         """
         member_id = await cache_get(CacheKeys.password_reset_token(data.reset_token))
         if not member_id:
-            raise InvalidTokenError(
-                "Session de réinitialisation expirée. Veuillez recommencer."
-            )
+            raise InvalidTokenError("Session de réinitialisation expirée. Veuillez recommencer.")
 
-        result = await self._db.execute(
-            select(Member).where(Member.id == member_id)
-        )
+        result = await self._db.execute(select(Member).where(Member.id == member_id))
         member = result.scalar_one_or_none()
         if not member:
             raise NotFoundError("Membre")
 
         if verify_password(member.password_hash, data.new_password):
-            raise BusinessRuleError(
-                "Le nouveau mot de passe doit être différent de l'ancien."
-            )
+            raise BusinessRuleError("Le nouveau mot de passe doit être différent de l'ancien.")
 
         member.password_hash = hash_password(data.new_password)
 
@@ -449,9 +443,7 @@ class AuthService:
 
     async def _get_by_email(self, email: str) -> Member | None:
         """Cherche un membre par email uniquement."""
-        result = await self._db.execute(
-            select(Member).where(Member.email == email)
-        )
+        result = await self._db.execute(select(Member).where(Member.email == email))
         return result.scalar_one_or_none()
 
     async def _create_tokens_for(self, member: Member) -> TokenResponse:

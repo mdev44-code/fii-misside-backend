@@ -138,6 +138,7 @@ async def get_me(
         ).model_dump()
     )
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MOT DE PASSE OUBLIÉ (routes publiques — pas de get_current_member)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,8 +155,7 @@ async def forgot_password(
     return success_response(
         data=result,
         message=(
-            "Si un compte est associé à cet email, "
-            "un code de vérification vient d'être envoyé."
+            "Si un compte est associé à cet email, un code de vérification vient d'être envoyé."
         ),
     )
 
@@ -180,8 +180,5 @@ async def reset_password(
     service = AuthService(db)
     await service.reset_password(data)
     return success_response(
-        message=(
-            "Mot de passe réinitialisé avec succès. "
-            "Vous pouvez maintenant vous connecter."
-        ),
+        message=("Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter."),
     )

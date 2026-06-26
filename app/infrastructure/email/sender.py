@@ -103,9 +103,7 @@ def _send_smtp_blocking(msg: EmailMessage) -> None:
             server.login(settings.smtp_user, settings.smtp_password)
             server.send_message(msg)
     else:
-        with smtplib.SMTP(
-            settings.smtp_host, settings.smtp_port, timeout=15
-        ) as server:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
             if settings.smtp_use_tls:
                 server.starttls(context=context)
             server.login(settings.smtp_user, settings.smtp_password)
