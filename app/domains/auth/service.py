@@ -1,15 +1,6 @@
-"""
-auth/service.py — Logique métier de l'authentification.
-
-Corrections v3 :
-  - register_from_invite : ne rappelle plus login() après flush() car le membre
-    n'est pas encore commis en BDD → génère les tokens directement depuis
-    l'objet membre en mémoire, comme le fait login() mais sans requête BDD.
-  - validate_group_token : nouvelle méthode pour vérifier un token de groupe.
-  - Imports : ajout RegisterFromGroupRequest et Role.
-"""
-
+import hmac
 import json
+import secrets
 from datetime import UTC, datetime
 
 from argon2 import PasswordHasher
@@ -20,13 +11,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.domains.auth.schemas import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     RegisterFromGroupRequest,
     RegisterFromInviteRequest,
+    ResetPasswordRequest,
     TokenResponse,
+    VerifyResetCodeRequest,
 )
-from app.infrastructure.cache.redis import CacheKeys, cache_delete, cache_get, cache_set
+from app.infrastructure.cache.redis import (
+    CacheKeys,
+    cache_delete,
+    cache_exists,
+    cache_get,
+    cache_incr,
+    cache_set,
+)
 from app.infrastructure.database.models import AuditLog, Member
+from app.infrastructure.email.sender import send_password_reset_email
 from app.infrastructure.security.jwt import (
     create_access_token,
     create_refresh_token,
@@ -42,7 +44,11 @@ from app.shared.exceptions import (
 )
 
 _hasher = PasswordHasher()
-
+# ── Réinitialisation de mot de passe ─────────────────────────────────────────
+_PWD_RESET_CODE_TTL = 5 * 60      # code OTP valable 5 minutes
+_PWD_RESET_TOKEN_TTL = 10 * 60    # reset_token valable 10 minutes
+_PWD_RESET_COOLDOWN = 60          # anti-spam : délai entre deux demandes (s)
+_MAX_CODE_ATTEMPTS = 5            # tentatives max avant blocage
 
 def hash_password(password: str) -> str:
     return _hasher.hash(password)
@@ -310,6 +316,121 @@ class AuthService:
         await cache_delete(CacheKeys.refresh_token(str(member.id)))
         await self._log(member.id, AuditAction.UPDATE, "member", member.id)
 
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # MOT DE PASSE OUBLIÉ — Étape 1 : demande de code
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def request_password_reset(self, data: ForgotPasswordRequest) -> dict:
+        """
+        Génère un code OTP à 6 chiffres et l'envoie par email.
+        Retourne toujours la même réponse (anti-énumération).
+        """
+        email = data.email
+        generic = {"expires_in_minutes": _PWD_RESET_CODE_TTL // 60}
+
+        member = await self._get_by_email(email)
+
+        if not member or member.status != MemberStatus.ACTIVE or not member.email:
+            return generic
+
+        # Anti-spam : pas plus d'un envoi par minute
+        cooldown_key = CacheKeys.password_reset_cooldown(email)
+        if await cache_exists(cooldown_key):
+            return generic
+
+        # Génère le code à 6 chiffres (zéros en tête possibles)
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        payload = json.dumps({"code": code, "member_id": str(member.id)})
+
+        await cache_set(CacheKeys.password_reset_code(email), payload, _PWD_RESET_CODE_TTL)
+        await cache_set(cooldown_key, "1", _PWD_RESET_COOLDOWN)
+        await cache_delete(CacheKeys.password_reset_attempts(email))
+
+        await send_password_reset_email(member.email, member.full_name, code)
+        await self._log(member.id, AuditAction.UPDATE, "member", member.id)
+        return generic
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # MOT DE PASSE OUBLIÉ — Étape 2 : vérification du code
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def verify_reset_code(self, data: VerifyResetCodeRequest) -> dict:
+        """
+        Vérifie le code OTP. Si correct, émet un reset_token à usage unique.
+        Bloqué après 5 tentatives.
+        """
+        email = data.email
+        code_key = CacheKeys.password_reset_code(email)
+        attempts_key = CacheKeys.password_reset_attempts(email)
+
+        cached = await cache_get(code_key)
+        if not cached:
+            raise BusinessRuleError("Code invalide ou expiré. Veuillez recommencer.")
+
+        attempts = await cache_incr(attempts_key, _PWD_RESET_CODE_TTL)
+        if attempts > _MAX_CODE_ATTEMPTS:
+            await cache_delete(code_key)
+            await cache_delete(attempts_key)
+            raise BusinessRuleError("Trop de tentatives. Veuillez redemander un code.")
+
+        info = json.loads(cached)
+        # Comparaison à temps constant (anti timing-attack)
+        if not hmac.compare_digest(str(info["code"]), data.code):
+            remaining = _MAX_CODE_ATTEMPTS - attempts
+            raise BusinessRuleError(
+                f"Code incorrect. Il vous reste {max(remaining, 0)} tentative(s)."
+            )
+
+        # Code correct → token à usage unique
+        reset_token = secrets.token_urlsafe(32)
+        await cache_set(
+            CacheKeys.password_reset_token(reset_token),
+            info["member_id"],
+            _PWD_RESET_TOKEN_TTL,
+        )
+        await cache_delete(code_key)
+        await cache_delete(attempts_key)
+
+        return {
+            "reset_token": reset_token,
+            "expires_in_minutes": _PWD_RESET_TOKEN_TTL // 60,
+        }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # MOT DE PASSE OUBLIÉ — Étape 3 : nouveau mot de passe
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def reset_password(self, data: ResetPasswordRequest) -> None:
+        """
+        Réinitialise le mot de passe via le reset_token.
+        Révoque aussi toutes les sessions actives.
+        """
+        member_id = await cache_get(CacheKeys.password_reset_token(data.reset_token))
+        if not member_id:
+            raise InvalidTokenError(
+                "Session de réinitialisation expirée. Veuillez recommencer."
+            )
+
+        result = await self._db.execute(
+            select(Member).where(Member.id == member_id)
+        )
+        member = result.scalar_one_or_none()
+        if not member:
+            raise NotFoundError("Membre")
+
+        if verify_password(member.password_hash, data.new_password):
+            raise BusinessRuleError(
+                "Le nouveau mot de passe doit être différent de l'ancien."
+            )
+
+        member.password_hash = hash_password(data.new_password)
+
+        # Token consommé + déconnexion globale
+        await cache_delete(CacheKeys.password_reset_token(data.reset_token))
+        await cache_delete(CacheKeys.refresh_token(str(member.id)))
+        await self._log(member.id, AuditAction.UPDATE, "member", member.id)
+
     # ─────────────────────────────────────────────────────────────────────────
     # MÉTHODES PRIVÉES
     # ─────────────────────────────────────────────────────────────────────────
@@ -323,6 +444,13 @@ class AuthService:
                     Member.email == identifier,
                 )
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_by_email(self, email: str) -> Member | None:
+        """Cherche un membre par email uniquement."""
+        result = await self._db.execute(
+            select(Member).where(Member.email == email)
         )
         return result.scalar_one_or_none()
 

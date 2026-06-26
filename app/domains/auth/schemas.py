@@ -156,6 +156,64 @@ class ChangePasswordRequest(BaseModel):
             raise ValueError("Le nouveau mot de passe doit contenir au moins 8 caractères")
         return v
 
+class ForgotPasswordRequest(BaseModel):
+    """Étape 1 : demande d'un code de réinitialisation par email."""
+
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_required(cls, v: str) -> str:
+        cleaned = _validate_email(v)
+        if not cleaned:
+            raise ValueError("L'email est requis.")
+        return cleaned
+
+
+class VerifyResetCodeRequest(BaseModel):
+    """Étape 2 : vérification du code à 6 chiffres."""
+
+    email: str
+    code: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_required(cls, v: str) -> str:
+        cleaned = _validate_email(v)
+        if not cleaned:
+            raise ValueError("L'email est requis.")
+        return cleaned
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, v: str) -> str:
+        v = v.strip()
+        if not re.fullmatch(r"\d{6}", v):
+            raise ValueError("Le code doit contenir exactement 6 chiffres.")
+        return v
+
+
+class ResetPasswordRequest(BaseModel):
+    """Étape 3 : définition du nouveau mot de passe."""
+
+    reset_token: str
+    new_password: str
+    confirm_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Le mot de passe doit contenir au moins 8 caractères.")
+        return v
+
+    @field_validator("confirm_password")
+    @classmethod
+    def passwords_match(cls, v: str, info) -> str:
+        if "new_password" in info.data and v != info.data["new_password"]:
+            raise ValueError("Les deux mots de passe ne correspondent pas.")
+        return v
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RESPONSES

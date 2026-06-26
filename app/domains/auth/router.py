@@ -1,34 +1,17 @@
-"""
-auth/router.py — Endpoints HTTP de l'authentification.
-
-Ce fichier ne contient AUCUNE logique métier.
-Son rôle se limite à :
-  1. Déclarer les routes (méthode HTTP + URL)
-  2. Recevoir les données (validées automatiquement par les schemas)
-  3. Injecter les dépendances (session DB, membre connecté)
-  4. Appeler le service
-  5. Retourner la réponse formatée
-
-Routes exposées :
-  POST /api/v1/auth/login        → connexion
-  POST /api/v1/auth/refresh      → renouveler le token
-  POST /api/v1/auth/logout       → déconnexion
-  POST /api/v1/auth/register     → créer compte depuis invitation
-  PUT  /api/v1/auth/password     → changer son mot de passe
-  GET  /api/v1/auth/me           → profil du membre connecté
-"""
-
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_member
 from app.domains.auth.schemas import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     MeResponse,
     RefreshRequest,
     RegisterFromGroupRequest,
     RegisterFromInviteRequest,
+    ResetPasswordRequest,
+    VerifyResetCodeRequest,
 )
 from app.domains.auth.service import AuthService
 from app.infrastructure.database.session import get_db
@@ -153,4 +136,52 @@ async def get_me(
             joined_at=(current_member.joined_at.isoformat() if current_member.joined_at else None),
             profile_picture_url=current_member.profile_picture_url,
         ).model_dump()
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MOT DE PASSE OUBLIÉ (routes publiques — pas de get_current_member)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Étape 1 — Envoie un code OTP si un compte existe pour cet email."""
+    service = AuthService(db)
+    result = await service.request_password_reset(data)
+    return success_response(
+        data=result,
+        message=(
+            "Si un compte est associé à cet email, "
+            "un code de vérification vient d'être envoyé."
+        ),
+    )
+
+
+@router.post("/verify-reset-code")
+async def verify_reset_code(
+    data: VerifyResetCodeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Étape 2 — Vérifie le code et renvoie un reset_token."""
+    service = AuthService(db)
+    result = await service.verify_reset_code(data)
+    return success_response(data=result, message="Code vérifié.")
+
+
+@router.post("/reset-password")
+async def reset_password(
+    data: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Étape 3 — Définit le nouveau mot de passe."""
+    service = AuthService(db)
+    await service.reset_password(data)
+    return success_response(
+        message=(
+            "Mot de passe réinitialisé avec succès. "
+            "Vous pouvez maintenant vous connecter."
+        ),
     )

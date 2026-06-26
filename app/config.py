@@ -74,6 +74,15 @@ class Settings(BaseSettings):
     aws_s3_endpoint_url: str | None = Field(default=None, env="AWS_S3_ENDPOINT_URL")
     aws_s3_public_url: str | None = Field(default=None, env="AWS_S3_PUBLIC_URL")
 
+    # ── Email (SMTP) ──────────────────────────────────────────────────────────
+    smtp_host: str = Field(default="", env="SMTP_HOST")
+    smtp_port: int = Field(default=587, env="SMTP_PORT")
+    smtp_user: str = Field(default="", env="SMTP_USER")
+    smtp_password: str = Field(default="", env="SMTP_PASSWORD")
+    smtp_from_email: str = Field(default="", env="SMTP_FROM_EMAIL")
+    smtp_from_name: str = Field(default="Fii Misside", env="SMTP_FROM_NAME")
+    smtp_use_tls: bool = Field(default=True, env="SMTP_USE_TLS")
+
     # ── Admin initial ─────────────────────────────────────────────────────────
     first_admin_phone: str = ""
     first_admin_email: str = ""

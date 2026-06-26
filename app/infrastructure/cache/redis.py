@@ -73,6 +73,17 @@ async def cache_exists(key: str) -> bool:
     """Vérifie si une clé existe encore (pas expirée)."""
     return bool(await get_redis().exists(key))
 
+async def cache_incr(key: str, ttl_seconds: int) -> int:
+    """
+    Incrémente un compteur atomiquement et pose le TTL au 1er appel.
+    Utilisé pour limiter les tentatives sur un code OTP.
+    """
+    r = get_redis()
+    value = await r.incr(key)
+    if value == 1:
+        await r.expire(key, ttl_seconds)
+    return value
+
 
 # ── Clés standardisées ────────────────────────────────────────────────────────
 # CacheKeys centralise la construction des clés Redis.
@@ -103,3 +114,23 @@ class CacheKeys:
     @staticmethod
     def rate_limit(ip: str, action: str) -> str:
         return f"rate_limit:{action}:{ip}"
+
+    @staticmethod
+    def password_reset_code(email: str) -> str:
+        """Code OTP indexé par email. Ex: 'pwd_reset_code:a@b.com'"""
+        return f"pwd_reset_code:{email}"
+
+    @staticmethod
+    def password_reset_attempts(email: str) -> str:
+        """Compteur de tentatives. Ex: 'pwd_reset_attempts:a@b.com'"""
+        return f"pwd_reset_attempts:{email}"
+
+    @staticmethod
+    def password_reset_token(token: str) -> str:
+        """Token à usage unique post-vérification. Ex: 'pwd_reset_token:xyz'"""
+        return f"pwd_reset_token:{token}"
+
+    @staticmethod
+    def password_reset_cooldown(email: str) -> str:
+        """Anti-spam entre deux demandes. Ex: 'pwd_reset_cooldown:a@b.com'"""
+        return f"pwd_reset_cooldown:{email}"
